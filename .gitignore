@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+src/evaluate/lead/docking/tmp/*
+wandb/*
+*.pdbqt
+data/
+*.json
+.env
+.claude/
+bash/
