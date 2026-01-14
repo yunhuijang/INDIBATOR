@@ -1,85 +1,34 @@
+
+lead_optimization_prompt = """
+Your task is to design a SMILES string for a molecule that optimizes binding affinity to {protein_name}.
+You must start from the provided seed molecule, modify it to improve predicted binding affinity (docking score), while strictly satisfying all drug-likeness and similarity constraints.
+
+# Seed Molecule: {seed_mol}
+
+# Conditions:
+- Optimize binding affinity (docking score) to {protein_name} protein.
+- Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
+- Design drug-like molecules with QED (Quantitative Estimation of Drug-likeness) >= 0.6.
+- Ensure synthetic accessibility with SA score <= 4.
+
+# IMPORTANT CONSTRAINTS:
+- The generated molecule MUST be structurally similar to the seed molecule, drug-like, and synthetically accessible. Keep the conditions above in mind when generating the molecule. This is very important.
+- YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
+- Avoid repeating molecules you already generated.
+
+# Suggested modification strategies (optional guidance)
+- Consider conservative bioisosteric replacements, small substituent additions/deletions, or ring modifications that preserve scaffold similarity but may improve docking score.
+- Avoid adding large, complex, or polycyclic groups that harm SA score.
+- Check that logP, molecular weight, and polar surface area remain in drug-like ranges.
+"""
+
 TASK_DESCRIPTION = {
     # Lead optimization task description
-    'lead_optimization/parp1': """
-    Your task is to design a SMILES string for a molecule that optimizes binding affinity to PARP1.
-
-    # Seed Molecule: {seed_mol}
-
-    # Conditions:
-    - Optimize binding affinity (docking score) to PARP1 protein.
-    - Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
-    - Design drug-like molecules with QED >= 0.6.
-    - Ensure synthetic accessibility with SA score <= 4.
-
-    # IMPORTANT CONSTRAINTS:
-    - The generated molecule MUST be structurally similar to the seed molecule.
-    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
-    - Avoid repeating molecules you already generated.
-    """,
-    'lead_optimization/fa7': """
-    Your task is to design a SMILES string for a molecule that optimizes binding affinity to FA7 (Factor VII).
-
-    # Seed Molecule: {seed_mol}
-
-    # Conditions:
-    - Optimize binding affinity (docking score) to FA7 protein.
-    - Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
-    - Design drug-like molecules with QED >= 0.6.
-    - Ensure synthetic accessibility with SA score <= 4.
-
-    # IMPORTANT CONSTRAINTS:
-    - The generated molecule MUST be structurally similar to the seed molecule.
-    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
-    - Avoid repeating molecules you already generated.
-    """,
-    'lead_optimization/5ht1b': """
-    Your task is to design a SMILES string for a molecule that optimizes binding affinity to 5-HT1B receptor.
-
-    # Seed Molecule: {seed_mol}
-
-    # Conditions:
-    - Optimize binding affinity (docking score) to 5-HT1B serotonin receptor.
-    - Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
-    - Design drug-like molecules with QED >= 0.6.
-    - Ensure synthetic accessibility with SA score <= 4.
-
-    # IMPORTANT CONSTRAINTS:
-    - The generated molecule MUST be structurally similar to the seed molecule.
-    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
-    - Avoid repeating molecules you already generated.
-    """,
-    'lead_optimization/braf': """
-    Your task is to design a SMILES string for a molecule that optimizes binding affinity to BRAF kinase.
-
-    # Seed Molecule: {seed_mol}
-
-    # Conditions:
-    - Optimize binding affinity (docking score) to BRAF kinase protein.
-    - Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
-    - Design drug-like molecules with QED >= 0.6.
-    - Ensure synthetic accessibility with SA score <= 4.
-
-    # IMPORTANT CONSTRAINTS:
-    - The generated molecule MUST be structurally similar to the seed molecule.
-    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
-    - Avoid repeating molecules you already generated.
-    """,
-    'lead_optimization/jak2': """
-    Your task is to design a SMILES string for a molecule that optimizes binding affinity to JAK2 kinase.
-
-    # Seed Molecule: {seed_mol}
-
-    # Conditions:
-    - Optimize binding affinity (docking score) to JAK2 kinase protein.
-    - Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
-    - Design drug-like molecules with QED >= 0.6.
-    - Ensure synthetic accessibility with SA score <= 4.
-
-    # IMPORTANT CONSTRAINTS:
-    - The generated molecule MUST be structurally similar to the seed molecule.
-    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
-    - Avoid repeating molecules you already generated.
-    """,
+    'lead_optimization/parp1': lead_optimization_prompt,
+    'lead_optimization/fa7': lead_optimization_prompt,
+    'lead_optimization/5ht1b': lead_optimization_prompt,
+    'lead_optimization/braf': lead_optimization_prompt,
+    'lead_optimization/jak2': lead_optimization_prompt,
     'pmo/Amlodipine_MPO': """
     Your task is to design a SMILES string for a molecule that satisfies the following conditions: 
     
@@ -152,7 +101,7 @@ TASK_DESCRIPTION = {
     - Avoid generating identical structures to provided examples.
     - Avoid repeating molecules you already generated.
     """,
-    'pmo/Median 1': """
+    'pmo/Median1': """
     Your task is to design a SMILES string for a molecule that satisfies the following conditions:
 
     # Conditions:
@@ -165,7 +114,7 @@ TASK_DESCRIPTION = {
     - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO MENTHOL: 'CC(C)C1CCC(C)CC1O'.
     - Avoid repeating molecules you already generated.
     """,
-    'pmo/Median 2': """
+    'pmo/Median2': """
     Your task is to design a SMILES string for a molecule that satisfies the following conditions:
 
     # Conditions:

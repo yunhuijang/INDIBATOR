@@ -8,7 +8,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
 from src.evaluate.tools_evaluate import evaluate_pmo, evaluate_lead
-from src.agent.state import MoleculeCandidate
+from src.agent.state import MoleculeCandidate, ScientistProfile
 from src.utils import extract_content
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,9 @@ def review_candidates(
     candidates: List[MoleculeCandidate],
     task_name: str,
     seed_mol_index: int,
-    sim_threshold: float
+    sim_threshold: float,
+    freq_log: int,
+    scientist_profiles: List[ScientistProfile]
 ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Review and score all candidate molecules.
 
@@ -72,62 +74,92 @@ def review_candidates(
     scored_candidates = []
     smiles_list = [c["smiles"] for c in candidates]
     task_name_clean = task_name.split('/')[-1]
-
+    final_output = []
+    # Lead optimization tasks
     if task_name.startswith('lead_optimization'):
         overall_score, result_df = evaluate_lead(smiles_list, task_name_clean, seed_mol_index, sim_threshold)
         result_dict = result_df.set_index('smiles').to_dict(orient='index')
 
         for candidate in candidates:
             smiles = candidate["smiles"]
+            scientist_profile = scientist_profiles.get([candidate["proposer"]], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
+            molecules = scientist_profile.get('molecules', [])
+            molecules_smiles = [m['smiles'] for m in molecules]
+            is_novel = smiles not in molecules_smiles
             if smiles in result_dict:
                 info = result_dict[smiles]
                 candidate["score"] = info.get("ds") or 0
-                candidate["score_details"] = {
-                    'qed': info.get("qed"),
-                    'sa': info.get("sa"),
-                    'sim': info.get("sim")
-                }
+                candidate["score_details"] = {'qed': info.get("qed"), 'sa': info.get("sa"), 'sim': info.get("sim"), 'is_novel': is_novel}
                 candidate["is_valid"] = info.get("is_valid", False)
                 candidate["is_qualified"] = info.get("is_qualified", False)
                 candidate["has_valid_ds"] = info.get("has_valid_ds", False)
                 scored_candidates.append(candidate)
+        # Sort: qualified+valid_ds first (by score desc), then others (by score desc)
+        qualified_valid = [c for c in scored_candidates if c.get("is_qualified") and c.get("has_valid_ds")]
+        others = [c for c in scored_candidates if not (c.get("is_qualified") and c.get("has_valid_ds"))]
+
+        qualified_valid.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
+        others.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
+
+        all_sorted = qualified_valid + others
+        
+        for i, c in enumerate(all_sorted):
+            final_output.append({
+                "rank": i + 1,
+                "smiles": c["smiles"],
+                "score": c.get("score", 0) or 0,
+                "proposer": c["proposer"],
+                "debate_round": c["round"],
+                "debate_votes": c.get("avg_vote", 0),
+                "num_votes": len(c.get("votes", {})),
+                "score_details": c.get("score_details", {}),
+                "is_valid": c.get("is_valid", False),
+                "is_qualified": c.get("is_qualified", False),
+                "has_valid_ds": c.get("has_valid_ds", False),
+            })
+
+        top_score = final_output[0]['score'] if final_output else 0
+        logger.info(f"Review complete. Top score: {top_score}")
     else:
-        overall_score, result_df = evaluate_pmo(smiles_list, task_name_clean)
+        # PMO tasks
+        overall_score, result_df = evaluate_pmo(smiles_list, task_name_clean, freq_log)
+        result_dict = result_df.set_index('smiles').to_dict(orient='index')
         for candidate in candidates:
-            candidate["is_valid"] = True
-            candidate["is_qualified"] = True
-            candidate["has_valid_ds"] = True
-            scored_candidates.append(candidate)
-
-    # Sort: qualified+valid_ds first (by score desc), then others (by score desc)
-    qualified_valid = [c for c in scored_candidates if c.get("is_qualified") and c.get("has_valid_ds")]
-    others = [c for c in scored_candidates if not (c.get("is_qualified") and c.get("has_valid_ds"))]
-
-    qualified_valid.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
-    others.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
-
-    all_sorted = qualified_valid + others
-
-    # Prepare final output with rank and qualification flags
-    final_output = []
-    for i, c in enumerate(all_sorted):
-        final_output.append({
-            "rank": i + 1,
-            "smiles": c["smiles"],
-            "score": c.get("score", 0) or 0,
-            "proposer": c["proposer"],
-            "debate_round": c["round"],
-            "debate_votes": c.get("avg_vote", 0),
-            "num_votes": len(c.get("votes", {})),
-            "score_details": c.get("score_details", {}),
-            "is_valid": c.get("is_valid", False),
-            "is_qualified": c.get("is_qualified", False),
-            "has_valid_ds": c.get("has_valid_ds", False),
-        })
-
-    top_score = final_output[0]['score'] if final_output else 0
-    logger.info(f"Review complete. Top score: {top_score}")
+            smiles = candidate["smiles"]
+            scientist_profile = scientist_profiles.get([candidate["proposer"]], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
+            molecules = scientist_profile.get('molecules', [])
+            molecules_smiles = [m['smiles'] for m in molecules]
+            is_novel = smiles not in molecules_smiles
+            
+            if smiles in molecules_smiles:
+                candidate["is_selected"] = True
+            else:
+                candidate["is_selected"] = False
+            if smiles in result_dict:
+                info = result_dict[smiles]
+                candidate["score"] = info.get("score")
+                candidate["score_details"] = {
+                    "is_novel": is_novel,
+                }
+                scored_candidates.append(candidate)
+        all_sorted = scored_candidates
+        for i, c in enumerate(all_sorted):
+            final_output.append({
+                "rank": i + 1,
+                "smiles": c["smiles"],
+                "score": c.get("score", 0) or 0,
+                "proposer": c["proposer"],
+                "debate_round": c["round"],
+                "debate_votes": c.get("avg_vote", 0),
+                "num_votes": len(c.get("votes", {})),
+                "score_details": c.get("score_details", {}),
+            })
+        
+        logger.info(f"Review complete. TOP 10 AUC score: {overall_score['score']:.4f}")
+    overall_score['avg_novel'] = sum([c.get("score_details", {}).get("is_novel", False) for c in all_sorted]) / len(all_sorted)
     return overall_score, final_output
+    # Prepare final output with rank and qualification flags
+
 
 
 # def run_reviewer_agent(

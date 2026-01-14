@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Optional
 
+from src.utils import canonicalize_smiles
+
 logger = logging.getLogger(__name__)
 
 # Database paths relative to project root
@@ -91,7 +93,7 @@ def get_molecules_by_author(author_name: str, limit: int = 50) -> List[Dict[str,
         )
         results = [
             {
-                "smiles": row["smiles"],
+                "smiles": canonicalize_smiles(row["smiles"]),
                 "inchi_key": row["inchi_key"],
                 "title": row["title"],
                 "pubmed_id": row["pubmed_id"]

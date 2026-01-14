@@ -1,25 +1,21 @@
 """Debate orchestrator for multi-round molecular optimization debates."""
 
 import logging
-import re
 from typing import Dict, List, Literal, Any
-import json
-import ast
 import wandb
 import pandas as pd
 from langgraph.graph import StateGraph, END
 
-from src.agent.state import DebateState, MoleculeCandidate, DebateMessage, DebateConfig
-from src.agent.scientist import (
-    create_scientist_agent,
-    load_scientist_profiles,
-    get_scientist_proposal,
-    get_scientist_critique,
-    get_scientist_votes,
-)
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+
+from src.agent.state import DebateState, MoleculeCandidate, DebateConfig
+from src.agent.scientist import create_scientist_agent, load_scientist_profiles, \
+    get_scientist_proposal, get_scientist_critique, get_scientist_votes, create_vanilla_scientist_agent
 from src.agent.summarizer import create_summarizer_agent
 from src.agent.reviewer import review_candidates
-from src.utils import canonicalize_smiles
+from src.utils import canonicalize_smiles, safe_parse_json_list
+from src.evaluate.tools_evaluate import evaluate_lead, evaluate_pmo
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +38,13 @@ class DebateOrchestrator:
         self.task_name = config.task_name
         self.seed_mol_index = config.seed_mol_index
         self.sim_threshold = config.sim_threshold
-        self.num_candidates = config.num_candidates
         self.num_scientists = config.num_scientists
         self.scientist_agents = {}
         self.top_k = config.top_k
+        self.use_vanilla_scientist_agent = config.use_vanilla_scientist_agent
+        self.num_mols_per_scientist = config.num_mols_per_scientist
+        self.num_candidates = config.num_candidates
+        self.freq_log = config.freq_log
         
     def run_debate(self, task_description: str, scientist_names: List[str]) -> Dict[str, Any]:
         """Run a complete debate session.
@@ -77,7 +76,11 @@ class DebateOrchestrator:
         state = self._initialize_debate(state)
 
         # Run debate rounds
-        while state["current_round"] <= self.max_rounds:
+        if self.task_name.startswith('lead_optimization'):
+            check_stop = lambda s: s["current_round"] <= self.max_rounds
+        else:
+            check_stop = lambda s: s["current_round"] <= self.max_rounds and len(s['candidates']) < self.num_candidates
+        while check_stop(state):
             round_num = state["current_round"]
             logger.info(f"=== Round {round_num} ===")
 
@@ -91,20 +94,78 @@ class DebateOrchestrator:
             state = self._voting_phase(state)
 
             # Check convergence
-            # if self._check_consensus(state) and len(state["candidates"]) >= self.num_candidates:
-
-            
+            # Aggregate candidates by unique SMILES
             candidates = state["candidates"]
-            if len(candidates) > 0:
-                overall_score, detailed_results = review_candidates(self.model, candidates, self.task_name, self.seed_mol_index, self.sim_threshold)
-                wandb.log(overall_score, step=round_num)
-                wandb_table = wandb.Table(dataframe=pd.DataFrame(detailed_results))
+            smiles_to_candidates = {}
+
+            for c in candidates:
+                smiles = c["smiles"]
+                if c["votes"]:
+                    scores = [float(score) for score in c["votes"].values()]
+                    c["avg_vote"] = sum(scores) / len(scores)
+                else:
+                    c["avg_vote"] = 0
+
+                if smiles not in smiles_to_candidates:
+                    # First occurrence - initialize aggregated entry
+                    smiles_to_candidates[smiles] = {
+                        "smiles": smiles,
+                        "proposer": c["proposer"],  # Keep first proposer for compatibility
+                        "proposers": [c["proposer"]],  # Track all proposers
+                        "round": c["round"],  # Keep first round for compatibility
+                        "rounds": [c["round"]],  # Track all rounds
+                        "votes": dict(c["votes"]),
+                        "avg_vote": c["avg_vote"],
+                        "critiques": list(c["critiques"]),
+                        "justifications": dict(c.get("justifications", {})),
+                        "score": c.get("score"),
+                    }
+                else:
+                    # Duplicate - aggregate votes and track additional proposers
+                    existing = smiles_to_candidates[smiles]
+                    if c["proposer"] not in existing["proposers"]:
+                        existing["proposers"].append(c["proposer"])
+                    if c["round"] not in existing["rounds"]:
+                        existing["rounds"].append(c["round"])
+                    # Merge votes (later votes override if same scientist voted again)
+                    existing["votes"].update(c["votes"])
+                    existing["critiques"].extend(c["critiques"])
+                    existing["justifications"].update(c.get("justifications", {}))
+                    # Recalculate avg_vote after merging
+                    if existing["votes"]:
+                        scores = [float(score) for score in existing["votes"].values()]
+                        existing["avg_vote"] = sum(scores) / len(scores)
+
+            # Sort unique candidates by total votes received
+            unique_candidates = list(smiles_to_candidates.values())
+            sorted_candidates = sorted(unique_candidates, key=lambda x: x.get("score", {}), reverse=True)
+            if self.task_name.lower().startswith('pmo'):
+                if len(sorted_candidates) > self.num_candidates:
+                    selected_candidates = sorted_candidates[:self.num_candidates]
+            else:
+                selected_candidates = sorted_candidates
+            selected_candidates_smiles = [c['smiles'] for c in selected_candidates]
+            for c in sorted_candidates:
+                if c['smiles'] in selected_candidates_smiles:
+                    c['is_selected'] = True
+                else:
+                    c['is_selected'] = False
+            state['candidates'] = sorted_candidates
+            
+            
+            if len(selected_candidates) > 0:
+                total_overall_score, total_detailed_results = review_candidates(self.model, selected_candidates, self.task_name, self.seed_mol_index, self.sim_threshold, self.freq_log, state['scientist_names'])
+                # for all candidates, update the score and detailed results
+                wandb.log(total_overall_score, step=round_num)
+                df = pd.DataFrame(total_detailed_results)
+                wandb_table = wandb.Table(dataframe=df)
                 wandb.log({"detailed_results": wandb_table}, step=round_num)
                 
                 # if self._check_consensus(state):
                 #     logger.info("Consensus reached, ending debate early")
                 #     break
-                
+                if state["current_round"] == self.max_rounds:
+                    logger.info("Max rounds reached, ending debate")
                 state["current_round"] += 1
             else:
                 logger.info("No candidates to review, re-run the debate")
@@ -118,10 +179,12 @@ class DebateOrchestrator:
     def _initialize_debate(self, state: DebateState) -> DebateState:
         """Initialize debate with scientist profiles and agents."""
         logger.info("Loading scientist profiles...")
-
-        profiles = load_scientist_profiles(state["scientist_names"])
-        sorted_profiles = sorted(profiles.items(), key=lambda x: len(x[1]['molecules'])+len(x[1]['publications']), reverse=True)
-        sorted_profiles = dict(sorted_profiles[:self.num_scientists])
+        if self.use_vanilla_scientist_agent:
+            sorted_profiles = {f"Scientist {i}": {"name": f"Scientist {i}", "publications": [], "molecules": []} for i in range(self.num_scientists)}
+        else:
+            profiles = load_scientist_profiles(state["scientist_names"])
+            sorted_profiles = sorted(profiles.items(), key=lambda x: len(x[1]['molecules'])+len(x[1]['publications']), reverse=True)
+            sorted_profiles = dict(sorted_profiles[:self.num_scientists])
         state["scientist_profiles"] = sorted_profiles
         if self.is_summary_agent:
             publication_summary_agent = create_summarizer_agent(self.model, 'publications',state['task_description'])
@@ -130,10 +193,14 @@ class DebateOrchestrator:
             publication_summary_agent = None
             molecule_summary_agent = None
         # Create agents for each scientist
-        for name, profile in sorted_profiles.items():
-            self.scientist_agents[name] = create_scientist_agent(
-                self.model, name, profile, state["task_description"], publication_summary_agent=publication_summary_agent, molecule_summary_agent=molecule_summary_agent
-            )
+        for i, (name, profile) in enumerate(sorted_profiles.items()):
+            if self.use_vanilla_scientist_agent:
+                name = f"Scientist {i}"
+                self.scientist_agents[name] = create_vanilla_scientist_agent(self.model, state["task_description"], i)
+            else:
+                self.scientist_agents[name] = create_scientist_agent(
+                    self.model, name, profile, state["task_description"], publication_summary_agent=publication_summary_agent, molecule_summary_agent=molecule_summary_agent
+                )
 
         state["phase"] = "proposal"
         return state
@@ -146,8 +213,8 @@ class DebateOrchestrator:
         new_messages = []
         new_candidates = []
 
-        # Format previous proposals for context
-        previous = self._format_previous_proposals(state)
+        # Format all candidates for debate
+        previous = self._format_all_candidates_for_debate(state["candidates"])
 
         for name in state["scientist_names"]:
             agent = self.scientist_agents.get(name)
@@ -155,8 +222,11 @@ class DebateOrchestrator:
                 continue
 
             response = get_scientist_proposal(
-                agent, state["task_description"], round_num, previous
+                agent, state["task_description"], round_num, previous, self.num_mols_per_scientist
             )
+            if isinstance(self.model, ChatGoogleGenerativeAI):
+                parsed = safe_parse_json_list(response)
+                response = parsed[0]['text'] if parsed and isinstance(parsed[0], dict) and 'text' in parsed[0] else response
 
             # Extract SMILES from response
             smiles_list = self._extract_smiles(response)
@@ -171,6 +241,7 @@ class DebateOrchestrator:
                     "votes": {},
                     "score": None,
                     "justifications": {},
+                    "is_selected": False,
                 })
 
             new_messages.append({
@@ -214,7 +285,17 @@ class DebateOrchestrator:
             response = get_scientist_critique(
                 agent, state["task_description"], round_num, proposals_list
             )
-            response_dict = {r['SMILES']: {'proposer': r['proposer'], 'critique': r['critique']} for r in ast.literal_eval(response)}
+            if isinstance(self.model, ChatGoogleGenerativeAI):
+                parsed = safe_parse_json_list(response)
+                response = parsed[0]['text'] if parsed and isinstance(parsed[0], dict) and 'text' in parsed[0] else response
+            parsed_response = safe_parse_json_list(response)
+            response_dict = {}
+            for r in parsed_response:
+                if isinstance(r, dict) and 'SMILES' in r:
+                    response_dict[r['SMILES']] = {
+                        'proposer': r.get('proposer', ''),
+                        'critique': r.get('critique', '')
+                    }
             new_messages.append({
                 "speaker": name,
                 "content": response,
@@ -249,7 +330,9 @@ class DebateOrchestrator:
             response = get_scientist_votes(
                 agent, state["task_description"], round_num, candidates_text
             )
-
+            if isinstance(self.model, ChatGoogleGenerativeAI):
+                parsed = safe_parse_json_list(response)
+                response = parsed[0]['text'] if parsed and isinstance(parsed[0], dict) and 'text' in parsed[0] else response
             # Parse votes from response
             votes = self._parse_votes(response)
             logger.info(f"{name} cast {len(votes)} votes")
@@ -272,30 +355,6 @@ class DebateOrchestrator:
         state["phase"] = "proposal"
         return state
 
-    def _check_consensus(self, state: DebateState) -> bool:
-        """Check if consensus has been reached."""
-        candidates = state["candidates"]
-        if not candidates:
-            return False
-
-        # Calculate average votes
-        for c in candidates:
-            if c["votes"]:
-                scores = [float(score) for score in c["votes"].values()]
-                c["avg_vote"] = sum(scores) / len(scores)
-            else:
-                c["avg_vote"] = 0
-
-        # Check if top candidate exceeds threshold
-        sorted_candidates = sorted(
-            candidates, key=lambda x: x.get("avg_vote", 0), reverse=True
-        )
-
-        if sorted_candidates and sorted_candidates[0].get("avg_vote", 0) >= self.consensus_threshold:
-            return True
-
-        return False
-
     def _aggregate_results(self, state: DebateState) -> DebateState:
         """Aggregate final results from the debate."""
         logger.info("Aggregating debate results...")
@@ -312,11 +371,11 @@ class DebateOrchestrator:
 
         # Sort by average vote
         sorted_candidates = sorted(
-            candidates, key=lambda x: x.get("avg_vote", 0), reverse=True
+            candidates, key=lambda x: len(x.get("votes", {})), reverse=True
         )
 
         # Keep top 10
-        state["candidates"] = sorted_candidates[:self.num_candidates]
+        state["candidates"] = sorted_candidates
         state["phase"] = "complete"
 
         logger.info(f"Debate complete. Top candidates: {len(state['candidates'])}")
@@ -325,16 +384,16 @@ class DebateOrchestrator:
     def _extract_smiles(self, text: str) -> List[str]:
         """Extract SMILES strings from text.
 
-        Uses regex to find SMILES-like patterns.
+        Uses safe parsing to handle malformed/truncated LLM responses.
         """
-        # TODO: Need to be fixed
-        
-        # Pattern for SMILES: starts with atom, contains typical SMILES characters
-        
-        result = ast.literal_eval(text)
-        smiles_list = [canonicalize_smiles(r['SMILES']) for r in result]
-        filtered_smiles_list = [smiles for smiles in smiles_list if smiles is not None]
-        return filtered_smiles_list
+        result = safe_parse_json_list(text)
+        smiles_list = []
+        for r in result:
+            if isinstance(r, dict) and 'SMILES' in r:
+                canonical = canonicalize_smiles(r['SMILES'])
+                if canonical:
+                    smiles_list.append(canonical)
+        return smiles_list
 
     def _format_previous_proposals(self, state: DebateState) -> str:
         """Format previous proposals for context."""
@@ -348,21 +407,51 @@ class DebateOrchestrator:
 
         lines = []
         for p in proposals[-10:]:  # Last 10 proposals
-            snippet = p["content"][:300] + "..." if len(p["content"]) > 300 else p["content"]
+            snippet = p["content"][:1000] + "..." if len(p["content"]) > 1000 else p["content"]
             lines.append(f"{p['speaker']} (round {p['round']}): {snippet}")
 
         return "\n\n".join(lines)
 
     def _format_proposals_for_critique(self, candidates: List[MoleculeCandidate]) -> str:
-        """Format proposals for the critique phase."""
+        """Format proposals for the critique phase with scores."""
+        
+
         lines = []
-        for c in candidates:
-            lines.append({c['smiles']: c['proposer']})
+
+        # Get SMILES list for batch scoring
+        smiles_list = [c['smiles'] for c in candidates]
+
+        if not smiles_list:
+            return lines
+
+        # Compute scores based on task type
+        task_name_clean = self.task_name.split('/')[-1]
+        # Lead optimization tasks
+        if self.task_name.startswith('lead_optimization'):
+            _, result_df = evaluate_lead(smiles_list, task_name_clean, self.seed_mol_index, self.sim_threshold)
+            result_dict = result_df.set_index('smiles').to_dict(orient='index')
+            for c in candidates:
+                if c.get("score") is not None:
+                    continue
+                smiles = c['smiles']
+                if smiles in result_dict:
+                    info = result_dict[smiles]
+                    c["score"] = info.get("score") or 0
+                    c["score_details"] = c.get("score_details", {}) 
+                lines.append({c['smiles']: {'proposer': c['proposer'], 'score': c['score'], 'score_details': c['score_details']}})
+
+        # PMO tasks
+        else:
+            for c in candidates:
+                lines.append({c['smiles']: {'proposer': c['proposer']}})
+
+
         return lines
 
     def _format_all_candidates(self, candidates: List[MoleculeCandidate]) -> str:
-        """Format all candidates for voting."""
+        """Format all candidates for voting, with truncation."""
         lines = []
+        # Limit to 50 candidates to prevent token overflow
         for i, c in enumerate(candidates, 1):
             vote_info = ""
             if c["votes"]:
@@ -371,14 +460,50 @@ class DebateOrchestrator:
             lines.append(
                 f"{i}. {c['smiles']} (by {c['proposer']}, round {c['round']}{vote_info})"
             )
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        if len(candidates) > 50:
+            result += f"\n... and {len(candidates) - 50} more candidates"
+        return result
 
+    def _format_all_candidates_for_debate(self, candidates: List[MoleculeCandidate]) -> str:
+        """Format top 20 candidates (by score) for debate with size limits."""
+        lines = []
+        sorted_candidates = sorted(candidates, key=lambda x: x.get("score", 0), reverse=True)
+        for i, c in enumerate(sorted_candidates[:20], 1):
+            vote_info = ""
+            if c["votes"]:
+                avg = sum([float(score) for score in c["votes"].values()]) / len(c["votes"])
+                vote_info = f", current avg vote: {avg:.2f}"
+            # Limit critiques and justifications more aggressively to prevent token overflow
+            critiques_str = "\n".join([crit[:400] + '...' if len(crit) > 400 else crit for crit in c['critiques'][:5]])
+            justifications_str = "\n".join([j[:400] + '...' if len(j) > 400 else j for j in list(c['justifications'].values())[:5]])
+            
+            current_text = f"{i}. {c['smiles']} (by {c['proposer']}, round {c['round']}{vote_info}):\n"
+            current_text += f"critiques: {critiques_str}\n"
+            current_text += f"justifications: {justifications_str}\n"
+            current_text += f"score: {c['score']}\n"
+            
+            if 'score_details' in c:
+                current_text += f"score_details (constraint): {c['score_details']}\n"
+                
+            lines.append(
+                current_text
+            )
+        return "\n".join(lines)
+    
     def _parse_votes(self, text: str) -> Dict[str, float]:
         """Parse votes from text response.
-        """
-        result = ast.literal_eval(text)
-        votes = {r['SMILES']: {'score': r['score'], 'justification': r['justification']} for r in result}
 
+        Uses safe parsing to handle malformed/truncated LLM responses.
+        """
+        result = safe_parse_json_list(text)
+        votes = {}
+        for r in result:
+            if isinstance(r, dict) and 'SMILES' in r:
+                votes[r['SMILES']] = {
+                    'score': r.get('score', 0),
+                    'justification': r.get('justification', '')
+                }
         return votes
 
 

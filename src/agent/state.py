@@ -15,9 +15,12 @@ class DebateConfig:
     top_k: int = 10
     seed_mol_index: int = 0
     sim_threshold: float = 0.4
-    num_candidates: int = 100
     num_scientists: int = 2
     temperature: float = 0.7
+    use_vanilla_scientist_agent: bool = False
+    num_mols_per_scientist: int = 3
+    freq_log: int = 100
+    num_candidates: int = 1000
 
 
 class ScientistProfile(TypedDict):

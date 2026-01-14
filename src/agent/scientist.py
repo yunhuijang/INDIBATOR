@@ -10,7 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from src.agent.state import ScientistProfile
 from src.db.queries import get_publications_by_author, get_molecules_by_author
 from src.agent.summarizer import summarize_publications, summarize_molecules
-from src.utils import extract_content
+from src.utils import extract_content, truncate_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,25 @@ Always ground your contributions in your specific published expertise.
 When proposing molecules, provide valid SMILES strings and clear scientific rationale.
 """
 
+def create_vanilla_scientist_agent(model, task_description: str, index: int):
+    """Create a vanilla scientist agent. (without any name and profile)"""
+    
+    prompt = SCIENTIST_PROMPT_TEMPLATE.format(
+        scientist_name=f"Scientist {index}",
+        publication_summary="",
+        molecule_summary="",
+        task_description=task_description
+    )
+
+    # No tools needed - the scientist's profile is already in the system prompt
+    # Removing get_publications tool prevents redundant DB queries during debate phases
+    agent = create_agent(
+        model=model,
+        tools=[],
+        system_prompt=prompt,
+    )
+
+    return agent
 
 def create_scientist_agent(model, scientist_name: str, profile: ScientistProfile, task: str, publication_summary_agent: CompiledStateGraph=None, molecule_summary_agent: CompiledStateGraph=None):
     """Create a scientist agent with loaded expertise.
@@ -133,7 +152,7 @@ def load_scientist_profiles(scientist_names: List[str]) -> Dict[str, ScientistPr
     return profiles
 
 
-def get_scientist_proposal(agent, task: str, round_num: int, previous_proposals: str) -> str:
+def get_scientist_proposal(agent, task: str, round_num: int, previous_proposals: str, num_mols: int) -> str:
     """Get a proposal from a scientist agent.
 
     Args:
@@ -145,6 +164,9 @@ def get_scientist_proposal(agent, task: str, round_num: int, previous_proposals:
     Returns:
         The scientist's proposal response
     """
+    # Truncate previous proposals to prevent token overflow
+    previous_proposals = truncate_for_prompt(previous_proposals, max_chars=100000)
+
     prompt = f"""Round {round_num} - PROPOSAL PHASE
 
 Task: {task}
@@ -152,30 +174,31 @@ Task: {task}
 Previous proposals in this debate:
 {previous_proposals if previous_proposals else "No previous proposals yet."}
 
-Based on your expertise, propose 1-3 novel molecules (as SMILES strings) that could address this task.
+Based on your expertise, propose {num_mols}-{num_mols+2} novel molecules (as SMILES strings) that could address this task.
 For each molecule:
 1. Provide the SMILES string
 2. Explain your rationale based on your published work
 3. Discuss expected properties relevant to the task
 
-Output format:[
-    {{
-        "SMILES": "SMILES string",
-        "rationale": "Rationale for the proposal",
-    }},
+Output format:
+[
+    {{"SMILES": "SMILES string", "rationale": "Brief rationale"}},
     ...
 ]
 
-You MUST STRICTLY output the result in the format specified above.
-You MUST NOT output anything else.
-
+IMPORTANT:
+- Output ONLY the JSON array, no other text or markdown
+- Keep rationales brief (3-4 sentences) to avoid truncation
+- Ensure all brackets and quotes are properly closed
+- Do NOT wrap in code blocks
+- Ensure the SMILES strings are valid and have not proposed in previous proposals
 """
 
     result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
     return extract_content(result)
 
 
-def get_scientist_critique(agent, task: str, round_num: int, proposals_to_critique: str) -> str:
+def get_scientist_critique(agent, task: str, round_num: int, proposals_list: list) -> str:
     """Get critiques from a scientist agent.
 
     Args:
@@ -187,6 +210,9 @@ def get_scientist_critique(agent, task: str, round_num: int, proposals_to_critiq
     Returns:
         The scientist's critique response
     """
+    # Truncate proposals to prevent token overflow
+    proposals_to_critique = truncate_for_prompt(proposals_list, max_chars=100000)
+
     prompt = f"""Round {round_num} - CRITIQUE PHASE
 
 Task: {task}
@@ -202,16 +228,15 @@ Based on your expertise, critique each proposal:
 
 Output format:
 [
-    {{
-        "SMILES": "SMILES string",
-        "proposer": "Proposer of the molecule",
-        "critique": "Critique for the proposal"
-    }},
+    {{"SMILES": "SMILES string", "proposer": "Name", "critique": "Brief critique"}},
     ...
 ]
 
-You MUST STRICTLY output the result in the format specified above.
-You MUST NOT output anything else.
+IMPORTANT:
+- Output ONLY the JSON array, no other text or markdown
+- Keep critiques brief (3-4 sentences) to avoid truncation
+- Ensure all brackets and quotes are properly closed
+- Do NOT wrap in code blocks
 """
 
     result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
@@ -230,6 +255,9 @@ def get_scientist_votes(agent, task: str, round_num: int, all_candidates: str) -
     Returns:
         The scientist's voting response
     """
+    # Truncate candidates list to prevent token overflow
+    all_candidates = truncate_for_prompt(all_candidates, max_chars=100000)
+
     prompt = f"""Round {round_num} - VOTING PHASE
 
 Task: {task}
@@ -250,16 +278,16 @@ Provide scores for at least top 3 candidates with brief justifications.
 
 Output format:
 [
-    {{
-        "SMILES": "SMILES string",
-        "score": "Score from 0.0 to 1.0",
-        "justification": "Justification for the score"
-    }},
+    {{"SMILES": "SMILES string", "score": 0.8, "justification": "Brief justification"}},
     ...
 ]
 
-You MUST STRICTLY output the result in the format specified above.
-You MUST NOT output anything else.
+IMPORTANT:
+- Output ONLY the JSON array, no other text or markdown
+- Keep justifications brief (3-4 sentences) to avoid truncation
+- Score must be a number between 0.0 and 1.0
+- Ensure all brackets and quotes are properly closed
+- Do NOT wrap in code blocks
 """
 
     result = agent.invoke({"messages": [HumanMessage(content=prompt)]})

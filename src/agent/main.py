@@ -22,6 +22,7 @@ from src.agent.supervisor import run_supervisor
 from src.agent.debate import DebateOrchestrator
 from src.agent.state import DebateConfig
 from src.utils import get_task_description
+from langchain_deepseek import ChatDeepSeek
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -66,12 +67,18 @@ def run_optimization(
         model = ChatGoogleGenerativeAI(model=model_name, temperature=config.temperature)
     elif 'claude' in model_name:
         model = ChatAnthropic(model=model_name, temperature=config.temperature)
+    elif 'deepseek' in model_name:
+        model = ChatDeepSeek(model=model_name, temperature=config.temperature)
 
     # Track LLM API usage cost
     with get_openai_callback() as cb:
         # Step 1: Supervisor selects scientists
         logger.info("\n[STEP 1] Supervisor selecting scientists...")
-        scientist_names = run_supervisor(model, task_description, config.num_scientists)
+        if config.use_vanilla_scientist_agent:
+            logger.info("Using vanilla scientist agent")
+            scientist_names = [f"Scientist {i}" for i in range(config.num_scientists)]
+        else:
+            scientist_names = run_supervisor(model, task_description, config.num_scientists)
 
         if not scientist_names:
             logger.error("No scientists selected. Check RAG service connection.")
@@ -160,6 +167,7 @@ Examples:
     parser.add_argument("--task_name", default="lead_optimization/parp1", 
                         help="Molecular optimization task name")
     parser.add_argument("--model", "-m", default="gpt-4o-mini",
+                        # claude-sonnet-4-5-20250929, gemini-3-flash-preview, deepseek-chat
                         help="OpenAI model to use (default: gpt-4o-mini)")
     parser.add_argument("--scientists", "-s", type=int,default=3,
         help="Number of scientists in debate (default: 10)")
@@ -180,10 +188,16 @@ Examples:
                         help="Seed molecule index for lead optimization task")
     parser.add_argument("--sim_threshold", type=float, default=0.4,
                         help="Similarity threshold for lead optimization task")
-    parser.add_argument("--wandb_mode", type=str, default="online",
+    parser.add_argument("--wandb_mode", type=str, default="disabled",
                         help="Wandb mode (online, offline, disabled)")
-    parser.add_argument("--num_candidates", type=int, default=100,
-                        help="Number of candidates to keep (default: 100)")
+    parser.add_argument("--use_vanilla_scientist_agent", action="store_true", help="Use vanilla scientist agent")
+    parser.add_argument("--num_mols_per_scientist", type=int, default=3,
+                        help="Number of molecules to propose per scientist (default: 3)")
+    parser.add_argument("--freq_log", type=int, default=100,
+                        help="Frequency of logging (default: 100)")
+    parser.add_argument("--num_candidates", type=int, default=1000,
+                        help="Number of candidates to keep (default: 1000)")
+    
     args = parser.parse_args()
 
     if args.verbose:
@@ -191,6 +205,8 @@ Examples:
 
     # Initialize wandb
     run_name = args.task_name.split('/')[1] + "_" + str(args.seed_mol_index) + "_" + str(args.sim_threshold) + "_" + args.model
+    if args.use_vanilla_scientist_agent:
+        run_name += "_vanilla"
     wandb.init(
         project="clever-hans",
         group=args.task_name.split('/')[0],
@@ -208,9 +224,12 @@ Examples:
         top_k=args.top_k_candidates,
         seed_mol_index=args.seed_mol_index,
         sim_threshold=args.sim_threshold,
-        num_candidates=args.num_candidates,
         num_scientists=args.scientists,
-        temperature=args.temperature
+        temperature=args.temperature,
+        use_vanilla_scientist_agent=args.use_vanilla_scientist_agent,
+        freq_log=args.freq_log,
+        num_candidates=args.num_candidates,
+        num_mols_per_scientist=args.num_mols_per_scientist
     )
     # Run optimization
     results = run_optimization(
@@ -221,7 +240,7 @@ Examples:
 
     # Sort results
     results_print = results['candidates']
-    results_print.sort(key=lambda x: x['score'], reverse=True)
+    results_print.sort(key=lambda x: x.get('score', 0), reverse=True)
     for i, candidate in enumerate(results_print):
         candidate['rank'] = i + 1
     

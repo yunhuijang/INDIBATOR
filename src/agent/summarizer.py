@@ -6,6 +6,8 @@ from typing import Dict, List, Any
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
+from src.utils import truncate_for_prompt
+
 logger = logging.getLogger(__name__)
 
 # summary_type: "publications" or "molecules"
@@ -41,16 +43,19 @@ def summarize_publications(agent, task_description: str, publications: List[Dict
         model: The LLM model to use
         description: The description of the task
     """
+    # Truncate publications to prevent token overflow
+    pub_text = truncate_for_prompt(publications, max_chars=80000)
+
     prompt = f"""
-    
+
     Task: {task_description}
 
-    Publications: {publications}
-    
+    Publications: {pub_text}
+
     Summarize the publications that are relevant to the given task.
     Write down the summary in a way that can be used to help the scientist agents propose molecules for the given task.
     """
-    
+
     result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
     return result
 
@@ -61,10 +66,13 @@ def summarize_molecules(agent, task_description: str, molecules: List[str]):
         model: The LLM model to use
         description: The description of the task
     """
+    # Truncate molecules to prevent token overflow
+    mol_text = truncate_for_prompt(molecules, max_chars=80000)
+
     prompt = f"""
     Task: {task_description}
 
-    Molecules: {molecules}
+    Molecules: {mol_text}
 
     Summarize the molecules that are relevant to the given task.
     If there exists a common structural characterstics (e.g., functional group, ring structure, etc.) among the molecules, mention it.

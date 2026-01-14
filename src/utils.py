@@ -1,8 +1,30 @@
 import requests
 import re
 from rdkit import Chem
+import ast
+import json
+import logging
+from typing import Any
 
 from prompt.task_description import TASK_DESCRIPTION
+
+logger = logging.getLogger(__name__)
+
+
+def truncate_for_prompt(content: Any, max_chars: int = 50000) -> str:
+    """Truncate content to fit within token limits.
+
+    Args:
+        content: The content to truncate (will be converted to string)
+        max_chars: Maximum characters (roughly 4 chars per token)
+
+    Returns:
+        Truncated string representation
+    """
+    text = str(content)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n... [truncated, {len(text) - max_chars} chars omitted]"
 
 
 def find_matches(text, k=3):
@@ -54,10 +76,85 @@ def get_task_description(task_name: str, seed_mol_index: int = 1, sim_threshold:
                                 'braf': ['CCN(CC)CCNC(=O)c3cnn4c(c2cccc(NC(=O)Nc1ccc(Cl)c(C(F)(F)F)c1)c2)ccnc34', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)NCCN1CCOCC1)c2)cc3)ccc4Cl', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)Nc1cccnc1)c2)cc3)ccc4Cl'],
                                 'jak2': ['OCCCCc2nc1ccccc1c4ncnc3[nH]cc2c34', 'COC(=O)CC2Nc1ccccc1c3ccnc4[nH]cc2c34', 'Oc5ccc(C2NC(=O)c1ccccc1c3ccnc4[nH]cc2c34)c(F)c5']}
         protein = task_name.split('/')[-1]
+        protein_name = {'parp1': 'PARP1', 'fa7': 'FA7', '5ht1b': '5-HT1B', 'braf': 'BRAF', 'jak2': 'JAK2'}.get(protein)
         seed_mol = protein_seedmol_dict[protein][seed_mol_index]
         
-        task_description = TASK_DESCRIPTION[task_name].format(seed_mol=seed_mol, sim_threshold=sim_threshold)
+        task_description = TASK_DESCRIPTION[task_name].format(seed_mol=seed_mol, sim_threshold=sim_threshold, protein_name=protein_name)
     else:
         task_description = TASK_DESCRIPTION[task_name]
         
     return task_description
+
+def safe_parse_json_list(text: str) -> list:
+    """Safely parse JSON/Python list from LLM response.
+
+    Tries multiple strategies to handle malformed/truncated responses:
+    1. Direct ast.literal_eval
+    2. Extract JSON array with regex and parse with json.loads
+    3. Fix truncated responses by finding last complete entry
+    4. Extract individual complete objects with regex
+
+    Args:
+        text: The LLM response text to parse
+
+    Returns:
+        Parsed list of dictionaries, or empty list if parsing fails
+    """
+    if not text or not text.strip():
+        return []
+
+    # Strategy 1: Try direct parsing
+    try:
+        return ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        pass
+
+    # Strategy 2: Extract JSON array with regex
+    try:
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            json_str = match.group()
+            return json.loads(json_str)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Strategy 3: Fix truncated responses - find last complete entry
+    try:
+        fixed = text
+        # Remove trailing commas before ] or }
+        fixed = re.sub(r',(\s*[}\]])', r'\1', fixed)
+
+        # Find the last complete JSON object by looking for "},"
+        last_complete = fixed.rfind('},')
+        if last_complete != -1:
+            fixed = fixed[:last_complete + 1] + ']'
+
+        # Close unclosed brackets
+        open_brackets = fixed.count('[') - fixed.count(']')
+        fixed += ']' * max(0, open_brackets)
+        open_braces = fixed.count('{') - fixed.count('}')
+        fixed += '}' * max(0, open_braces)
+
+        return ast.literal_eval(fixed)
+    except (SyntaxError, ValueError):
+        pass
+
+    # Strategy 4: Last resort - find all complete SMILES objects individually
+    try:
+        pattern = r'\{\s*"SMILES"\s*:\s*"[^"]+"\s*(?:,\s*"[^"]+"\s*:\s*(?:"[^"]*"|[^,}]+)\s*)*\}'
+        matches = re.findall(pattern, text)
+        if matches:
+            results = []
+            for m in matches:
+                try:
+                    results.append(ast.literal_eval(m))
+                except (SyntaxError, ValueError):
+                    continue
+            if results:
+                return results
+    except Exception:
+        pass
+
+    # If all parsing fails, return empty list and log warning
+    logger.warning(f"Failed to parse LLM response: {text[:200]}...")
+    return []

@@ -2,6 +2,7 @@ from langchain_core.tools import tool
 import wandb
 import re
 from tdc import Oracle
+import pandas as pd
 
 from src.evaluate.lead.utils_lead import compute_lead
 from src.evaluate.pmo.utils_pmo import compute_pmo
@@ -29,18 +30,23 @@ def evaluate_lead(smiles: list, task_name: str, seed_idx: int, sim_threshold: fl
     return overall_score, result_df
 
 
-def evaluate_pmo(smiles: list, task_name:str=None):
+def evaluate_pmo(smiles: list, task_name:str, freq_log: int):
     """
     Evaluate the PMO for a given task description.
     """
-    task_list = ['Amlodipine_MPO', 'Celecoxib_Rediscovery', 'DRD2', 'Fexofenadine_MPO',
-                 'JNK3', 'GSK3B', 'Median 1', 'Median 2', 'Osimertinib_MPO', 'Perindopril_MPO',
-                 'Ranolazine_MPO', 'Sitagliptin_MPO', 'Zaleplon_MPO']
+    # TDC oracle names are lowercase
+    task_list = ['amlodipine_mpo', 'celecoxib_rediscovery', 'drd2', 'fexofenadine_mpo',
+                 'jnk3', 'gsk3b', 'median1', 'median2', 'osimertinib_mpo', 'perindopril_mpo',
+                 'ranolazine_mpo', 'sitagliptin_mpo', 'zaleplon_mpo']
+
+    # Convert to lowercase for case-insensitive matching
+    task_name_lower = task_name.lower() if task_name else None
+
+    if task_name_lower not in task_list:
+        raise ValueError(f'Wrong task name: {task_name}. You can only choose from {task_list}.')
+
+    oracle = Oracle(name=task_name_lower)
+    result, smiles_score_list = compute_pmo(oracle, smiles, freq_log)
     
-    if task_name not in task_list:
-        raise ValueError('Wrong task name: {task_name}. You can only choose from {task_list}.')
-    
-    oracle = Oracle(name=task_name)
-    result = compute_pmo(oracle, smiles)
-    
-    wandb.log
+    result_df = pd.DataFrame(smiles_score_list, columns=['smiles', 'score'])
+    return result, result_df

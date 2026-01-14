@@ -143,11 +143,15 @@ def compute_lead(
         (df['sim'] >= sim_threshold)
     )
 
-    # Compute docking only for qualified molecules
-    qualified_smiles = df.loc[df['is_qualified'], 'smiles'].tolist()
-    if qualified_smiles:
-        docking_scores = compute_docking_scores(protein, qualified_smiles)
-        df.loc[df['is_qualified'], 'ds'] = docking_scores
+    # Compute docking for valid molecules
+    df['ds'] = 0.0  # Initialize as float to avoid dtype warnings
+    valid_smiles_list = df.loc[df['is_valid'], 'smiles'].tolist()
+    if valid_smiles_list:
+        docking_scores = compute_docking_scores(protein, valid_smiles_list)
+        # Use explicit index-based assignment for guaranteed correct alignment
+        valid_indices = df.loc[df['is_valid']].index
+        for idx, score in zip(valid_indices, docking_scores):
+            df.loc[idx, 'ds'] = score
 
     # Mark valid docking scores
     df['has_valid_ds'] = df['ds'].notna() & (df['ds'] > 0)

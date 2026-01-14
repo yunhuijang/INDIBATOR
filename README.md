@@ -1,1 +1,2 @@
-uv run pubmedFastRAG/embed.py
+cd pubmedFastRAG
+bash start_servers.sh

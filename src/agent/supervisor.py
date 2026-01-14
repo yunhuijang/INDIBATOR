@@ -91,24 +91,25 @@ def _extract_scientists_from_result(result: Dict[str, Any]) -> List[str]:
 
     messages = result.get("messages", [])
     for msg in messages:
-        # Check for tool messages with scientist lists
-        if hasattr(msg, 'content') and isinstance(msg.content, list):
-            scientists.extend(msg.content)
-        elif hasattr(msg, 'content') and isinstance(msg.content, str):
-            # Try to parse list from string representation
-            content = msg.content
-            if '[' in content and ']' in content:
-                try:
-                    import ast
-                    # Find list in content
-                    start = content.find('[')
-                    end = content.rfind(']') + 1
-                    list_str = content[start:end]
-                    parsed = ast.literal_eval(list_str)
-                    if isinstance(parsed, list):
-                        scientists.extend(parsed)
-                except (ValueError, SyntaxError):
-                    pass
+        if msg.type == 'tool':
+            # Check for tool messages with scientist lists
+            if hasattr(msg, 'content') and isinstance(msg.content, list):
+                scientists.extend(msg.content)
+            elif hasattr(msg, 'content') and isinstance(msg.content, str):
+                # Try to parse list from string representation
+                content = msg.content
+                if '[' in content and ']' in content:
+                    try:
+                        import ast
+                        # Find list in content
+                        start = content.find('[')
+                        end = content.rfind(']') + 1
+                        list_str = content[start:end]
+                        parsed = ast.literal_eval(list_str)
+                        if isinstance(parsed, list):
+                            scientists.extend(parsed)
+                    except (ValueError, SyntaxError):
+                        pass
 
     # Deduplicate while preserving order
     seen = set()
