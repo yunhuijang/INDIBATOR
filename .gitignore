@@ -16,3 +16,6 @@ data/
 .env
 .claude/
 bash/
+boltz/output/
+output/
+*.npz

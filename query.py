@@ -159,6 +159,7 @@ def clean_authors_abstract_table():
         authors, 
         first_author, 
         last_author,
+        author_raw,
         author_token AS author_final,
         TRIM(
             string_split(author_token, ' ')[-1] || ' ' 
@@ -167,7 +168,8 @@ def clean_authors_abstract_table():
     FROM authors_expanded
     -- WHERE author_token ~ '^[a-z][a-z''\\-]+(?: [a-z''\\-]+)* [a-z]{1,4}$'
     """
-
     print("Running optimized SQL query via DuckDB...")
     con.execute(query)
     print("Done! Table created in your SQLite database.")
+    
+clean_authors_abstract_table()

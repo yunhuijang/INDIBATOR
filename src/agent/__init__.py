@@ -4,7 +4,7 @@ from src.agent.main import run_optimization, print_results
 from src.agent.supervisor import run_supervisor
 from src.agent.debate import DebateOrchestrator
 from src.agent.reviewer import review_candidates
-from src.agent.tools import get_scientists, get_publications, compute_molecule_score
+from src.agent.tools import get_scientists, get_publications
 
 __all__ = [
     "run_optimization",
@@ -13,6 +13,5 @@ __all__ = [
     "DebateOrchestrator",
     "review_candidates",
     "get_scientists",
-    "get_publications",
-    "compute_molecule_score",
+    "get_publications"
 ]

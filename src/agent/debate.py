@@ -11,10 +11,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from src.agent.state import DebateState, MoleculeCandidate, DebateConfig
 from src.agent.scientist import create_scientist_agent, load_scientist_profiles, \
-    get_scientist_proposal, get_scientist_critique, get_scientist_votes, create_vanilla_scientist_agent
+    get_scientist_proposal, get_scientist_critique, get_scientist_votes, create_vanilla_scientist_agent, \
+    get_scientist_self_critique
 from src.agent.summarizer import create_summarizer_agent
 from src.agent.reviewer import review_candidates
-from src.utils import canonicalize_smiles, safe_parse_json_list
+from src.utils import canonicalize_smiles, safe_parse_json_list, extract_smiles
 from src.evaluate.tools_evaluate import evaluate_lead, evaluate_pmo
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,10 @@ class DebateOrchestrator:
         self.num_mols_per_scientist = config.num_mols_per_scientist
         self.num_candidates = config.num_candidates
         self.freq_log = config.freq_log
+        self.is_self_critique_on = config.is_self_critique_on
+        self.min_rounds = config.min_rounds
         
-    def run_debate(self, task_description: str, scientist_names: List[str]) -> Dict[str, Any]:
+    def run_debate(self, task_description: str, scientist_names: List[str], cb) -> Dict[str, Any]:
         """Run a complete debate session.
 
         Args:
@@ -76,16 +79,20 @@ class DebateOrchestrator:
         state = self._initialize_debate(state)
 
         # Run debate rounds
-        if self.task_name.startswith('lead_optimization'):
-            check_stop = lambda s: s["current_round"] <= self.max_rounds
-        else:
-            check_stop = lambda s: s["current_round"] <= self.max_rounds and len(s['candidates']) < self.num_candidates
+        check_stop = lambda s: s["current_round"] < self.min_rounds or (s["current_round"] <= self.max_rounds and len(s['candidates']) < self.num_candidates)
         while check_stop(state):
             round_num = state["current_round"]
             logger.info(f"=== Round {round_num} ===")
 
             # Proposal phase
             state = self._proposal_phase(state)
+            if self.task_name.startswith('lead_optimization'):
+                state = self._update_scores(state)
+            # Self critique phase (optional)
+            if self.is_self_critique_on:
+                state = self._self_critique_phase(state)
+                if self.task_name.startswith('lead_optimization'):
+                    state = self._update_scores(state)
 
             # Critique phase
             state = self._critique_phase(state)
@@ -133,17 +140,17 @@ class DebateOrchestrator:
                     existing["justifications"].update(c.get("justifications", {}))
                     # Recalculate avg_vote after merging
                     if existing["votes"]:
+                        
                         scores = [float(score) for score in existing["votes"].values()]
                         existing["avg_vote"] = sum(scores) / len(scores)
 
             # Sort unique candidates by total votes received
             unique_candidates = list(smiles_to_candidates.values())
-            sorted_candidates = sorted(unique_candidates, key=lambda x: x.get("score", {}), reverse=True)
-            if self.task_name.lower().startswith('pmo'):
-                if len(sorted_candidates) > self.num_candidates:
-                    selected_candidates = sorted_candidates[:self.num_candidates]
-            else:
-                selected_candidates = sorted_candidates
+            sorted_candidates = sorted(unique_candidates, key=lambda x: x.get("score", 0), reverse=True)
+            selected_candidates = sorted_candidates
+            # if self.task_name.lower().startswith('pmo') and len(selected_candidates) > self.num_candidates:
+            if len(selected_candidates) > self.num_candidates:
+                selected_candidates = sorted_candidates[:self.num_candidates]
             selected_candidates_smiles = [c['smiles'] for c in selected_candidates]
             for c in sorted_candidates:
                 if c['smiles'] in selected_candidates_smiles:
@@ -154,12 +161,18 @@ class DebateOrchestrator:
             
             
             if len(selected_candidates) > 0:
-                total_overall_score, total_detailed_results = review_candidates(self.model, selected_candidates, self.task_name, self.seed_mol_index, self.sim_threshold, self.freq_log, state['scientist_names'])
+                total_overall_score, total_detailed_results = review_candidates(self.model, selected_candidates, self.task_name, self.seed_mol_index, self.sim_threshold, self.freq_log, state['scientist_profiles'], wandb.run.name, self.num_candidates)
                 # for all candidates, update the score and detailed results
                 wandb.log(total_overall_score, step=round_num)
                 df = pd.DataFrame(total_detailed_results)
                 wandb_table = wandb.Table(dataframe=df)
                 wandb.log({"detailed_results": wandb_table}, step=round_num)
+                wandb.log({
+                    "total_cost_usd": cb.total_cost,
+                    "total_tokens": cb.total_tokens,
+                    "prompt_tokens": cb.prompt_tokens,
+                    "completion_tokens": cb.completion_tokens,
+                }, step=round_num)
                 
                 # if self._check_consensus(state):
                 #     logger.info("Consensus reached, ending debate early")
@@ -182,7 +195,7 @@ class DebateOrchestrator:
         if self.use_vanilla_scientist_agent:
             sorted_profiles = {f"Scientist {i}": {"name": f"Scientist {i}", "publications": [], "molecules": []} for i in range(self.num_scientists)}
         else:
-            profiles = load_scientist_profiles(state["scientist_names"])
+            profiles = load_scientist_profiles(state["scientist_names"], self.task_name)
             sorted_profiles = sorted(profiles.items(), key=lambda x: len(x[1]['molecules'])+len(x[1]['publications']), reverse=True)
             sorted_profiles = dict(sorted_profiles[:self.num_scientists])
         state["scientist_profiles"] = sorted_profiles
@@ -214,7 +227,7 @@ class DebateOrchestrator:
         new_candidates = []
 
         # Format all candidates for debate
-        previous = self._format_all_candidates_for_debate(state["candidates"])
+        previous = self._format_previous_best_candidates_for_debate(state["candidates"])
 
         for name in state["scientist_names"]:
             agent = self.scientist_agents.get(name)
@@ -229,17 +242,18 @@ class DebateOrchestrator:
                 response = parsed[0]['text'] if parsed and isinstance(parsed[0], dict) and 'text' in parsed[0] else response
 
             # Extract SMILES from response
-            smiles_list = self._extract_smiles(response)
-            logger.info(f"{name} proposed {len(smiles_list)} molecules")
+            smiles_list = extract_smiles(response)
+            unique_smiles_list = list(set(smiles_list))
+            logger.info(f"{name} proposed {len(smiles_list)} molecules; {len(unique_smiles_list)} unique molecules")
 
-            for smiles in smiles_list:
+            for smiles in unique_smiles_list:
                 new_candidates.append({
                     "smiles": smiles,
                     "proposer": name,
                     "round": round_num,
                     "critiques": [],
                     "votes": {},
-                    "score": None,
+                    "score": 0,
                     "justifications": {},
                     "is_selected": False,
                 })
@@ -254,6 +268,80 @@ class DebateOrchestrator:
         state["messages"] = state["messages"] + new_messages
         state["candidates"] = state["candidates"] + new_candidates
         state["phase"] = "critique"
+        logger.info(f"Round {round_num}: Proposal phase complete. {len(state['candidates'])} candidates proposed")
+        return state
+
+    def _self_critique_phase(self, state: DebateState) -> DebateState:
+        """Run the self critique phase where scientists critique their own proposals and re-propose."""
+        round_num = state["current_round"]
+        logger.info(f"Round {round_num}: Self critique phase")
+
+        new_messages = []
+        new_candidates = []
+        current_candidate_smiles = [c['smiles'] for c in state['candidates']]
+
+        for name in state["scientist_names"]:
+            agent = self.scientist_agents.get(name)
+            if not agent:
+                continue
+
+            # Get this scientist's OWN proposals from current round
+            own_proposals = [
+                c for c in state["candidates"]
+                if c["proposer"] == name and c["round"] == round_num
+            ]
+
+            if not own_proposals:
+                continue
+
+            # Format own proposals with scores
+            own_proposals_with_scores = self._format_proposals_for_critique(own_proposals)
+
+            # Get self-critique and improved proposals
+            response = get_scientist_self_critique(
+                agent, state["task_description"], round_num,
+                own_proposals_with_scores, self.num_mols_per_scientist
+            )
+
+            if isinstance(self.model, ChatGoogleGenerativeAI):
+                parsed = safe_parse_json_list(response)
+                response = parsed[0]['text'] if parsed and isinstance(parsed[0], dict) and 'text' in parsed[0] else response
+
+            # Extract improved SMILES from response
+            smiles_list = list(set(extract_smiles(response)))
+            original_smiles_list = list(set(self._extract_original_smiles(response)))
+            logger.info(f"{name} re-proposed {len(smiles_list)} improved molecules after self-critique")
+
+            
+            for original_smiles in original_smiles_list:
+                # Remove the original candidate from the list of candidates
+                if original_smiles in current_candidate_smiles:
+                    current_candidate = [c for c in state['candidates'] if c['smiles'] == original_smiles and c['proposer'] == name and c['round'] == round_num]
+                    if len(current_candidate) > 0:
+                        state['candidates'].remove(current_candidate[0])
+
+            for smiles in smiles_list:
+                new_candidates.append({
+                    "smiles": smiles,
+                    "proposer": name,
+                    "round": round_num,
+                    "critiques": [],
+                    "votes": {},
+                    "score": 0,
+                    "justifications": {},
+                    "is_selected": False,
+                })
+
+            new_messages.append({
+                "speaker": name,
+                "content": response,
+                "round": round_num,
+                "message_type": "self_critique",
+            })
+
+        state["messages"] = state["messages"] + new_messages
+        state["candidates"] = state["candidates"] + new_candidates
+        logger.info(f"Round {round_num}: Self critique phase complete. {len(state['candidates'])} candidates re-proposed")
         return state
 
     def _critique_phase(self, state: DebateState) -> DebateState:
@@ -381,16 +469,33 @@ class DebateOrchestrator:
         logger.info(f"Debate complete. Top candidates: {len(state['candidates'])}")
         return state
 
-    def _extract_smiles(self, text: str) -> List[str]:
-        """Extract SMILES strings from text.
+    def _update_scores(self, state: DebateState) -> DebateState:
+        """Update scores for candidates."""
+        logger.info("Updating scores for candidates...")
+        candidates = state['candidates']
+        smiles_list = [c['smiles'] for c in candidates]
+        _, result_df = evaluate_lead(smiles_list, self.task_name, self.seed_mol_index, self.sim_threshold)
+        result_dict = result_df.set_index('smiles').to_dict(orient='index')
+        for c in candidates:
+            if c['smiles'] in result_dict:
+                c['score'] = result_dict[c['smiles']]['ds']
+                c['score_details'] = {'qed': result_dict[c['smiles']]['qed'], 'sa': result_dict[c['smiles']]['sa'], 'sim': result_dict[c['smiles']]['sim']}
+            else:
+                c['score'] = 0
+        return state
+    
+
+    
+    def _extract_original_smiles(self, text: str) -> List[str]:
+        """Extract original SMILES strings from text.
 
         Uses safe parsing to handle malformed/truncated LLM responses.
         """
         result = safe_parse_json_list(text)
         smiles_list = []
         for r in result:
-            if isinstance(r, dict) and 'SMILES' in r:
-                canonical = canonicalize_smiles(r['SMILES'])
+            if isinstance(r, dict) and 'original_SMILES' in r:
+                canonical = canonicalize_smiles(r['original_SMILES'])
                 if canonical:
                     smiles_list.append(canonical)
         return smiles_list
@@ -424,21 +529,10 @@ class DebateOrchestrator:
         if not smiles_list:
             return lines
 
-        # Compute scores based on task type
-        task_name_clean = self.task_name.split('/')[-1]
         # Lead optimization tasks
         if self.task_name.startswith('lead_optimization'):
-            _, result_df = evaluate_lead(smiles_list, task_name_clean, self.seed_mol_index, self.sim_threshold)
-            result_dict = result_df.set_index('smiles').to_dict(orient='index')
             for c in candidates:
-                if c.get("score") is not None:
-                    continue
-                smiles = c['smiles']
-                if smiles in result_dict:
-                    info = result_dict[smiles]
-                    c["score"] = info.get("score") or 0
-                    c["score_details"] = c.get("score_details", {}) 
-                lines.append({c['smiles']: {'proposer': c['proposer'], 'score': c['score'], 'score_details': c['score_details']}})
+                lines.append({c['smiles']: {'proposer': c['proposer'], 'score': c['score'], 'score_details': {k: round(v, 3) for k, v in c['score_details'].items()}}})
 
         # PMO tasks
         else:
@@ -461,11 +555,10 @@ class DebateOrchestrator:
                 f"{i}. {c['smiles']} (by {c['proposer']}, round {c['round']}{vote_info})"
             )
         result = "\n".join(lines)
-        if len(candidates) > 50:
-            result += f"\n... and {len(candidates) - 50} more candidates"
+
         return result
 
-    def _format_all_candidates_for_debate(self, candidates: List[MoleculeCandidate]) -> str:
+    def _format_previous_best_candidates_for_debate(self, candidates: List[MoleculeCandidate]) -> str:
         """Format top 20 candidates (by score) for debate with size limits."""
         lines = []
         sorted_candidates = sorted(candidates, key=lambda x: x.get("score", 0), reverse=True)

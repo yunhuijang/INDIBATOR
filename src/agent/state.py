@@ -21,6 +21,9 @@ class DebateConfig:
     num_mols_per_scientist: int = 3
     freq_log: int = 100
     num_candidates: int = 1000
+    is_self_critique_on: bool = False
+    is_rag_keyword: bool = False
+    min_rounds: int = 0
 
 
 class ScientistProfile(TypedDict):

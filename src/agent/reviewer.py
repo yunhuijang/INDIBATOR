@@ -3,11 +3,12 @@
 import logging
 from typing import Dict, List, Any
 import wandb
-
+import json
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
-from src.evaluate.tools_evaluate import evaluate_pmo, evaluate_lead
+
+from src.evaluate.tools_evaluate import evaluate_pmo, evaluate_lead, evaluate_boltz
 from src.agent.state import MoleculeCandidate, ScientistProfile
 from src.utils import extract_content
 
@@ -28,24 +29,6 @@ Be thorough and objective in your assessments.
 """
 
 
-# def create_reviewer_agent(model):
-#     """Create the reviewer agent for quality verification.
-
-#     Args:
-#         model: The LLM model to use
-
-#     Returns:
-#         Compiled ReAct agent for reviewing molecules
-#     """
-#     agent = create_agent(
-#         model=model,
-#         tools=[evaluate_lead, evaluate_pmo],
-#         system_prompt=REVIEWER_PROMPT,
-#     )
-
-#     return agent
-
-
 def review_candidates(
     model,
     candidates: List[MoleculeCandidate],
@@ -53,8 +36,11 @@ def review_candidates(
     seed_mol_index: int,
     sim_threshold: float,
     freq_log: int,
-    scientist_profiles: List[ScientistProfile]
+    scientist_profiles: Dict[str, ScientistProfile],
+    run_name: str,
+    num_candidates: int,
 ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    
     """Review and score all candidate molecules.
 
     Args:
@@ -73,16 +59,15 @@ def review_candidates(
 
     scored_candidates = []
     smiles_list = [c["smiles"] for c in candidates]
-    task_name_clean = task_name.split('/')[-1]
     final_output = []
     # Lead optimization tasks
-    if task_name.startswith('lead_optimization'):
-        overall_score, result_df = evaluate_lead(smiles_list, task_name_clean, seed_mol_index, sim_threshold)
+    if 'lead_optimization' in task_name:
+        overall_score, result_df = evaluate_lead(smiles_list, task_name, seed_mol_index, sim_threshold)
         result_dict = result_df.set_index('smiles').to_dict(orient='index')
 
         for candidate in candidates:
             smiles = candidate["smiles"]
-            scientist_profile = scientist_profiles.get([candidate["proposer"]], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
+            scientist_profile = scientist_profiles.get(candidate["proposer"], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
             molecules = scientist_profile.get('molecules', [])
             molecules_smiles = [m['smiles'] for m in molecules]
             is_novel = smiles not in molecules_smiles
@@ -120,13 +105,62 @@ def review_candidates(
 
         top_score = final_output[0]['score'] if final_output else 0
         logger.info(f"Review complete. Top score: {top_score}")
-    else:
+    elif 'boltz' in task_name:
+        # Boltz binding affinity tasks
+        smiles_list = [c['smiles'] for c in candidates]
+        wandb.log({"smiles_list": smiles_list})
+        json.dump(smiles_list, open(f"output/boltz/{task_name.split('/')[-1]}/smiles_list_{run_name}.json", "w"))
+        
+        if len(candidates) >= num_candidates:
+            overall_score, result_df = evaluate_boltz(candidates, task_name, run_name)
+            result_dict = result_df.set_index('smiles').to_dict(orient='index')
+
+            for candidate in candidates:
+                smiles = candidate["smiles"]
+                scientist_profile = scientist_profiles.get(candidate["proposer"], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
+                molecules = scientist_profile.get('molecules', [])
+                molecules_smiles = [m['smiles'] for m in molecules]
+                is_novel = smiles not in molecules_smiles
+
+                if smiles in result_dict:
+                    info = result_dict[smiles]
+                    # Score is negated affinity (higher = better binding)
+                    candidate["score"] = info.get("score") or 0
+                    candidate["score_details"] = {
+                        'affinity_pred_value': info.get("affinity_pred_value"),
+                        'affinity_probability_binary': info.get("affinity_probability_binary"),
+                        'is_novel': is_novel
+                    }
+                    candidate["is_valid"] = info.get("is_valid", False)
+                    scored_candidates.append(candidate)
+
+            # Sort by score descending (higher score = better binding)
+            scored_candidates.sort(key=lambda x: x.get("score", 0) or 0, reverse=True)
+            all_sorted = scored_candidates
+
+            for i, c in enumerate(all_sorted):
+                final_output.append({
+                    "rank": i + 1,
+                    "smiles": c["smiles"],
+                    "score": c.get("score", 0) or 0,
+                    "proposer": c["proposer"],
+                    "debate_round": c["round"],
+                    "debate_votes": c.get("avg_vote", 0),
+                    "num_votes": len(c.get("votes", {})),
+                    "score_details": c.get("score_details", {}),
+                    "is_valid": c.get("is_valid", False),
+                })
+
+            top_score = final_output[0]['score'] if final_output else 0
+            logger.info(f"Review complete. Top boltz score: {top_score}")
+    elif 'pmo' in task_name:
         # PMO tasks
+        task_name_clean = task_name.split('/')[-1]
         overall_score, result_df = evaluate_pmo(smiles_list, task_name_clean, freq_log)
         result_dict = result_df.set_index('smiles').to_dict(orient='index')
         for candidate in candidates:
             smiles = candidate["smiles"]
-            scientist_profile = scientist_profiles.get([candidate["proposer"]], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
+            scientist_profile = scientist_profiles.get(candidate["proposer"], {'name': candidate["proposer"], 'publications': [], 'molecules': []})
             molecules = scientist_profile.get('molecules', [])
             molecules_smiles = [m['smiles'] for m in molecules]
             is_novel = smiles not in molecules_smiles
@@ -156,74 +190,7 @@ def review_candidates(
             })
         
         logger.info(f"Review complete. TOP 10 AUC score: {overall_score['score']:.4f}")
+    else:
+        raise ValueError(f"Invalid task name: {task_name}")
     overall_score['avg_novel'] = sum([c.get("score_details", {}).get("is_novel", False) for c in all_sorted]) / len(all_sorted)
     return overall_score, final_output
-    # Prepare final output with rank and qualification flags
-
-
-
-# def run_reviewer_agent(
-#     model,
-#     candidates: List[MoleculeCandidate],
-#     task_description: str
-# ) -> List[Dict[str, Any]]:
-#     """Run the reviewer agent for comprehensive evaluation.
-
-#     This version uses the LLM agent to provide qualitative analysis
-#     in addition to the quantitative scores.
-
-#     Args:
-#         model: The LLM model to use
-#         candidates: List of candidate molecules
-#         task_description: The optimization task
-
-#     Returns:
-#         List of scored and analyzed molecules
-#     """
-#     # First, get quantitative scores
-#     scored_candidates = review_candidates(model, candidates, task_description)
-
-#     if not scored_candidates:
-#         return []
-
-#     # Optionally, get qualitative analysis from the agent
-#     agent = create_reviewer_agent(model)
-
-#     # Format candidates for agent
-#     candidates_text = "\n".join([
-#         f"{c['rank']}. {c['smiles']} (score: {c['score']:.3f}, debate votes: {c['debate_votes']:.2f})"
-#         for c in scored_candidates[:10]
-#     ])
-
-#     prompt = f"""Task: {task_description}
-
-# Here are the top candidate molecules from the debate, with their scores:
-
-# {candidates_text}
-
-# Please provide:
-# 1. A brief analysis of why the top candidates scored well
-# 2. Any concerns about the top candidates
-# 3. Your recommendation for the best molecule to pursue
-
-# Use the compute_molecule_score tool if you need to verify any scores.
-# """
-
-#     try:
-#         result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
-
-#         # Extract analysis from result
-#         analysis = extract_content(result)
-
-#         # Add analysis to output
-#         if analysis:
-#             for c in scored_candidates:
-#                 c["reviewer_analysis"] = analysis
-
-#     except Exception as e:
-#         logger.warning(f"Agent analysis failed: {e}")
-
-#     return scored_candidates
-
-
-

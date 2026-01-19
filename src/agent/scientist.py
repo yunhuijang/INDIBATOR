@@ -123,7 +123,7 @@ def create_scientist_agent(model, scientist_name: str, profile: ScientistProfile
     return agent
 
 
-def load_scientist_profiles(scientist_names: List[str]) -> Dict[str, ScientistProfile]:
+def load_scientist_profiles(scientist_names: List[str], task_name: str) -> Dict[str, ScientistProfile]:
     """Load profiles for all selected scientists.
 
     Args:
@@ -135,8 +135,8 @@ def load_scientist_profiles(scientist_names: List[str]) -> Dict[str, ScientistPr
     profiles = {}
 
     for name in scientist_names:
-        publications = get_publications_by_author(name)
-        molecules = get_molecules_by_author(name)
+        publications = get_publications_by_author(name, task_name)
+        molecules = get_molecules_by_author(name, task_name)
 
         profiles[name] = {
             "name": name,
@@ -177,7 +177,7 @@ Previous proposals in this debate:
 Based on your expertise, propose {num_mols}-{num_mols+2} novel molecules (as SMILES strings) that could address this task.
 For each molecule:
 1. Provide the SMILES string
-2. Explain your rationale based on your published work
+2. Explain your rationale based on your published work and proposed molecules in the published work
 3. Discuss expected properties relevant to the task
 
 Output format:
@@ -192,6 +192,7 @@ IMPORTANT:
 - Ensure all brackets and quotes are properly closed
 - Do NOT wrap in code blocks
 - Ensure the SMILES strings are valid and have not proposed in previous proposals
+- Do NOT propose the duplicated molecules. Each proposal should be unique.
 """
 
     result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
@@ -221,7 +222,7 @@ Review these proposals from other scientists:
 {proposals_to_critique}
 
 Based on your expertise, critique each proposal:
-- Identify potential issues (toxicity, synthesis difficulty, selectivity)
+- Identify potential issues considering the task description
 - Suggest specific modifications if appropriate
 - Note any overlap with molecules in your experience
 - Highlight promising aspects that align with your research
@@ -288,6 +289,58 @@ IMPORTANT:
 - Score must be a number between 0.0 and 1.0
 - Ensure all brackets and quotes are properly closed
 - Do NOT wrap in code blocks
+"""
+
+    result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
+    return extract_content(result)
+
+
+def get_scientist_self_critique(agent, task: str, round_num: int, own_proposals: list, num_mols: int) -> str:
+    """Get self-critique and re-proposals from a scientist agent.
+
+    Args:
+        agent: The scientist's agent
+        task: The optimization task
+        round_num: Current debate round
+        own_proposals: List of the scientist's own proposals with scores
+        num_mols: Number of improved molecules to propose
+
+    Returns:
+        The scientist's improved proposals after self-critique
+    """
+    # Format own proposals with scores
+    own_proposals_text = truncate_for_prompt(own_proposals, max_chars=50000)
+
+    prompt = f"""Round {round_num} - SELF-CRITIQUE PHASE
+
+Task: {task}
+
+Your proposals this round with their scores:
+{own_proposals_text}
+
+Based on the scores and your expertise:
+1. Select the molecules that does not satisfy the conditions of the task and why.
+2. Critique your own proposals - identify weaknesses and areas for improvement.
+2. Propose {num_mols} unique IMPROVED molecules that address these weaknesses
+3. DO NOT propose the SAME MOLECULE as your original proposals.
+
+For each improved molecule:
+- Explain how it improves upon your original proposals
+- Consider the score feedback to guide improvements
+- Ensure the SMILES string is valid and different from your original proposals. DO NOT propose the duplicated molecules.
+
+Output format:
+[
+    {{"original_SMILES": "Original SMILES string", "rationale": "How this improves on your original proposal", "SMILES": "Newly proposed SMILES string"}},
+    ...
+]
+
+IMPORTANT:
+- Output ONLY the JSON array, no other text or markdown
+- Keep rationales brief (3-4 sentences) to avoid truncation
+- Ensure all brackets and quotes are properly closed
+- Do NOT wrap in code blocks
+- Propose molecules that are DIFFERENT from your original proposals
 """
 
     result = agent.invoke({"messages": [HumanMessage(content=prompt)]})

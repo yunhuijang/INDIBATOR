@@ -52,6 +52,9 @@ class DockingVina(object):
         elif target == 'braf':
             self.box_center = (84.194, 6.949, -7.081)
             self.box_size = (22.032, 19.211, 14.106)
+        elif target == 'sars_cov_2':
+            self.box_center = ()
+            self.box_size = ()
         
         self.vina_program = os.path.join('src/evaluate/lead/docking/qvina02')
         self.receptor_file = os.path.join(f'src/evaluate/lead/docking/{target}.pdbqt')

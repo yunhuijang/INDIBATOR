@@ -6,6 +6,15 @@ This module orchestrates the complete workflow:
 3. Reviewer scores the candidates
 4. Final ranked results are returned
 """
+import os
+import torch
+
+os.environ.setdefault("OMP_NUM_THREADS", "8")
+os.environ.setdefault("MKL_NUM_THREADS", "8")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "8")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "8")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "8")
+
 
 import argparse
 import logging
@@ -13,7 +22,9 @@ import sys
 from typing import List, Dict, Any, Optional
 import json
 import wandb
+
 import config  # Load .env file before initializing OpenAI client
+
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -23,6 +34,12 @@ from src.agent.debate import DebateOrchestrator
 from src.agent.state import DebateConfig
 from src.utils import get_task_description
 from langchain_deepseek import ChatDeepSeek
+
+from prompt.task_rag_keyword import TASK_RAG_KEYWORD
+
+
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +74,7 @@ def run_optimization(
     logger.info(f"Scientists: {config.num_scientists}")
     logger.info(f"Max rounds: {config.max_rounds}")
     logger.info(f"Is summary agent: {config.is_summary_agent}")
+    logger.info(f"Is self-critique on: {config.is_self_critique_on}")
     logger.info(f"Top k: {config.top_k}")
     logger.info("=" * 60)
 
@@ -78,7 +96,11 @@ def run_optimization(
             logger.info("Using vanilla scientist agent")
             scientist_names = [f"Scientist {i}" for i in range(config.num_scientists)]
         else:
-            scientist_names = run_supervisor(model, task_description, config.num_scientists)
+            if config.is_rag_keyword:
+                rag_prompt = TASK_RAG_KEYWORD[config.task_name]
+            else:
+                rag_prompt = task_description
+            scientist_names = run_supervisor(model, rag_prompt, config.num_scientists)
 
         if not scientist_names:
             logger.error("No scientists selected. Check RAG service connection.")
@@ -90,7 +112,7 @@ def run_optimization(
         # Step 2: Run debate
         logger.info("\n[STEP 2] Running debate...")
         orchestrator = DebateOrchestrator(model=model, config=config)
-        debate_result = orchestrator.run_debate(task_description, scientist_names)
+        debate_result = orchestrator.run_debate(task_description, scientist_names, cb)
 
         # Add cost info to debate_result and log to wandb
         debate_result["total_cost_usd"] = cb.total_cost
@@ -103,6 +125,8 @@ def run_optimization(
         })
         logger.info(f"Total LLM cost: ${cb.total_cost:.4f} ({cb.total_tokens} tokens)")
 
+    if not os.path.exists(f"output/{config.task_name}"):
+        os.makedirs(f"output/{config.task_name}")
     with open(f"output/{config.task_name}/{wandb.run.name}_{wandb.run.id}.json", "w") as f:
         json.dump(debate_result, f)
     candidates = debate_result.get("candidates", [])
@@ -114,10 +138,11 @@ def run_optimization(
     logger.info(f"Debate produced {len(candidates)} candidates")
 
     # # Step 3: Review and score candidates
-    # logger.info("\n[STEP 3] Reviewing candidates...")
-    # final_results = review_candidates(
-    #     model, candidates, config.task_name, config.seed_mol_index, config.sim_threshold
-    # )
+    # if 'boltz' in config.task_name:
+    #     logger.info("\n[STEP 3] Reviewing candidates...")
+    #     final_results = review_candidates(
+    #         model, candidates, config.task_name, config.seed_mol_index, config.sim_threshold
+    #     )
 
     # logger.info("\n" + "=" * 60)
     # logger.info("OPTIMIZATION COMPLETE")
@@ -197,7 +222,11 @@ Examples:
                         help="Frequency of logging (default: 100)")
     parser.add_argument("--num_candidates", type=int, default=1000,
                         help="Number of candidates to keep (default: 1000)")
-    
+    parser.add_argument("--is_self_critique_on", action="store_true",
+                        help="Enable self-critique phase where scientists critique and improve their own proposals")
+    parser.add_argument("--is_rag_keyword", action="store_true", help="Enable keyword-based RAG")
+    parser.add_argument("--min_rounds", type=int, default=0,
+                        help="Minimum rounds to run (default: 0)")
     args = parser.parse_args()
 
     if args.verbose:
@@ -207,6 +236,8 @@ Examples:
     run_name = args.task_name.split('/')[1] + "_" + str(args.seed_mol_index) + "_" + str(args.sim_threshold) + "_" + args.model
     if args.use_vanilla_scientist_agent:
         run_name += "_vanilla"
+    if args.is_self_critique_on:
+        run_name += "_self_critique"
     wandb.init(
         project="clever-hans",
         group=args.task_name.split('/')[0],
@@ -229,7 +260,10 @@ Examples:
         use_vanilla_scientist_agent=args.use_vanilla_scientist_agent,
         freq_log=args.freq_log,
         num_candidates=args.num_candidates,
-        num_mols_per_scientist=args.num_mols_per_scientist
+        num_mols_per_scientist=args.num_mols_per_scientist,
+        is_self_critique_on=args.is_self_critique_on,
+        is_rag_keyword=args.is_rag_keyword,
+        min_rounds=args.min_rounds
     )
     # Run optimization
     results = run_optimization(
@@ -256,4 +290,6 @@ Examples:
 
 
 if __name__ == "__main__":
+    torch.set_num_threads(8)
+    torch.set_num_interop_threads(1)
     main()

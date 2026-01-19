@@ -46,33 +46,27 @@ def create_supervisor_agent(model):
     return agent
 
 
-def run_supervisor(model, task_description: str, num_scientists: int = 10) -> List[str]:
+def run_supervisor(model, rag_prompt, num_scientists: int = 10) -> List[str]:
     """Run the supervisor to select scientists.
 
     Args:
-        model: The LLM model to use
-        task_description: The molecular optimization task
+        model: The LLM model to use (kept for API compatibility)
+        rag_prompt: The RAG query - either a string or list of keywords
         num_scientists: Target number of scientists to select
 
     Returns:
         List of scientist names
     """
-    logger.info(f"Supervisor selecting scientists for: {task_description[:50]}...")
+    # Convert keyword list to query string if needed
+    if isinstance(rag_prompt, list):
+        query = " ".join(rag_prompt)
+    else:
+        query = rag_prompt
 
-    agent = create_supervisor_agent(model)
+    logger.info(f"Supervisor selecting scientists for: {query[:50]}...")
 
-    # Invoke the agent
-    result = agent.invoke({
-        "messages": [
-            HumanMessage(content=f"""Find scientists for this task: {task_description}
-
-Use the get_scientists tool with k={num_scientists} to find relevant researchers.
-Return the list of scientist names.""")
-        ]
-    })
-
-    # Extract scientist names from the result
-    scientist_names = _extract_scientists_from_result(result)
+    # Call get_scientists directly with exact query (bypass LLM reformulation)
+    scientist_names = get_scientists.invoke({"task": query, "k": num_scientists})
 
     logger.info(f"Supervisor selected {len(scientist_names)} scientists")
     return scientist_names

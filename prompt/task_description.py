@@ -5,21 +5,125 @@ You must start from the provided seed molecule, modify it to improve predicted b
 
 # Seed Molecule: {seed_mol}
 
-# Conditions:
-- Optimize binding affinity (docking score) to {protein_name} protein.
-- Maintain structural similarity to the chosen seed molecule (Tanimoto similarity >= {sim_threshold}).
-- Design drug-like molecules with QED (Quantitative Estimation of Drug-likeness) >= 0.6.
-- Ensure synthetic accessibility with SA score <= 4.
+# Hard Constraints (MUST satisfy ALL):
+1. Tanimoto Similarity >= {sim_threshold}
+2. QED (drug-likeness) >= 0.6
+3. SA Score (synthetic accessibility) <= 4
+4. NOT identical to seed molecule
 
-# IMPORTANT CONSTRAINTS:
-- The generated molecule MUST be structurally similar to the seed molecule, drug-like, and synthetically accessible. Keep the conditions above in mind when generating the molecule. This is very important.
-- YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THE SEED.
-- Avoid repeating molecules you already generated.
+# Metric Definitions:
 
-# Suggested modification strategies (optional guidance)
-- Consider conservative bioisosteric replacements, small substituent additions/deletions, or ring modifications that preserve scaffold similarity but may improve docking score.
-- Avoid adding large, complex, or polycyclic groups that harm SA score.
-- Check that logP, molecular weight, and polar surface area remain in drug-like ranges.
+## Tanimoto Similarity (target: >= {sim_threshold})
+Measures structural similarity between your molecule and the seed using Morgan fingerprints.
+- Score range: 0 (completely different) to 1 (identical)
+- Calculated as: (shared features) / (total unique features in both molecules)
+- To maintain high similarity: preserve the core scaffold and make only small modifications
+
+## QED - Quantitative Estimate of Drug-likeness (target: >= 0.6)
+A composite score combining 8 drug-like properties, ranging 0-1 (higher = more drug-like).
+Based on: molecular weight, logP, H-bond donors/acceptors, polar surface area, rotatable bonds, aromatic rings, and structural alerts.
+To achieve QED >= 0.6:
+- Molecular Weight: 200-500 Da
+- LogP: 0-5
+- H-bond donors: <= 5
+- H-bond acceptors: <= 10
+- Rotatable bonds: <= 10
+- Aromatic rings: 1-4
+
+## SA Score - Synthetic Accessibility (target: <= 4)
+Estimates how easy a molecule is to synthesize, ranging 1 (easy) to 10 (very difficult).
+Calculated from fragment contributions (based on 1M PubChem molecules) plus complexity penalties for unusual features.
+To achieve SA <= 4:
+- Use common, commercially available building blocks
+- Avoid: large rings (>8 atoms), bridgehead/spiro atoms, multiple stereocenters
+- Prefer simple ring systems (benzene, pyridine, piperidine)
+
+# Recommended Modifications (preserve similarity, maintain drug-likeness):
+- Small substituent changes: -H → -F, -CH3 → -CF3, -OH → -OCH3
+- Bioisosteric replacements: benzene ↔ pyridine, -COOH ↔ -CONH2
+- Methylation of amines: -NH2 → -NHCH3
+- Small ring modifications: 6-ring → 5-ring
+
+# Modifications to AVOID:
+- Adding large polycyclic systems (hurts SA)
+- Adding > 2 new rings (may hurt similarity)
+- Adding unusual functional groups (hurts SA)
+- Removing core scaffold elements (hurts similarity)
+
+Generate ONLY the SMILES string with no explanation.
+"""
+
+
+lead_optimization_mood_prompt = """
+Your task is to design a SMILES string for a molecule that optimizes binding affinity to {protein_name}.
+You must discover novel molecules that improves the hit ratio, where hit ratio is the number of molecules that satisfy the following constraints divided by the total number of molecules.
+
+# Seed Molecules: {seed_molecules}
+
+# Hard Constraints (MUST satisfy ALL):
+1. max(Tanimoto Similarity) <= 0.4
+2. QED (drug-likeness) >= 0.5
+3. SA Score (synthetic accessibility) <= 5
+4. Docking score > {docking_score_threshold}
+4. NOT identical to seed molecule
+
+# Metric Definitions:
+
+## Tanimoto Similarity (target: <= 0.4)
+Measures structural similarity between your molecule and the seed molecules using Morgan fingerprints.
+- Score range: 0 (completely different) to 1 (identical)
+- Calculated as: (shared features) / (total unique features in both molecules)
+- The maximum Tanimoto Similarity score should be as low as possible.
+
+## QED - Quantitative Estimate of Drug-likeness (target: >= 0.5)
+A composite score combining 8 drug-like properties, ranging 0-1 (higher = more drug-like).
+Based on: molecular weight, logP, H-bond donors/acceptors, polar surface area, rotatable bonds, aromatic rings, and structural alerts.
+To achieve QED >= 0.5:
+- Molecular Weight: 200-500 Da
+- LogP: 0-5
+- H-bond donors: <= 5
+- H-bond acceptors: <= 10
+- Rotatable bonds: <= 10
+- Aromatic rings: 1-4
+
+## SA Score - Synthetic Accessibility (target: <= 5)
+Estimates how easy a molecule is to synthesize, ranging 1 (easy) to 10 (very difficult).
+Calculated from fragment contributions (based on 1M PubChem molecules) plus complexity penalties for unusual features.
+To achieve SA <= 5:
+- Use common, commercially available building blocks
+- Avoid: large rings (>8 atoms), bridgehead/spiro atoms, multiple stereocenters
+- Prefer simple ring systems (benzene, pyridine, piperidine)
+
+# Modifications to AVOID:
+- Adding large polycyclic systems (hurts SA)
+- Adding unusual functional groups (hurts SA)
+
+Generate ONLY the SMILES string with no explanation.
+"""
+
+boltz_prompt = """
+Your task is to design a SMILES string for a molecule that maximizes binding affinity to {protein_name}.
+
+# Objective:
+Design molecules with high predicted binding affinity (low IC50) to {protein_name}.
+
+# Evaluation Metrics:
+- affinity_pred_value: log10(IC50) in μM - LOWER values indicate STRONGER binding
+
+# Protein sequence:
+{protein_sequence}
+
+# Molecular Constraints:
+- Must be a valid SMILES string
+
+# Guidelines for High Binding Affinity:
+- Include appropriate functional groups for hydrogen bonding (amines, hydroxyls, carbonyls)
+- Consider hydrophobic contacts with protein binding pocket (aromatic rings, alkyl chains)
+- Maintain reasonable molecular weight (300-600 Da)
+- Include aromatic rings for pi-stacking interactions
+- Consider salt bridges with charged residues (carboxylic acids, amines)
+
+Generate ONLY the SMILES string with no explanation.
 """
 
 TASK_DESCRIPTION = {
@@ -29,6 +133,24 @@ TASK_DESCRIPTION = {
     'lead_optimization/5ht1b': lead_optimization_prompt,
     'lead_optimization/braf': lead_optimization_prompt,
     'lead_optimization/jak2': lead_optimization_prompt,
+    'lead_optimization/sars_cov_2': lead_optimization_prompt,
+    # MOOD lead optimization task description
+    'lead_optimization_mood/parp1': lead_optimization_mood_prompt,
+    'lead_optimization_mood/fa7': lead_optimization_mood_prompt,
+    'lead_optimization_mood/5ht1b': lead_optimization_mood_prompt,
+    'lead_optimization_mood/braf': lead_optimization_mood_prompt,
+    'lead_optimization_mood/jak2': lead_optimization_mood_prompt,
+    'lead_optimization_mood/sars_cov_2': lead_optimization_mood_prompt,
+    # Boltz binding affinity prediction task
+    'boltz/CA2': boltz_prompt,
+    'boltz/CDK2': boltz_prompt,
+    'boltz/DHFR': boltz_prompt,
+    'boltz/FABP4': boltz_prompt,
+    'boltz/JNK1': boltz_prompt,
+    'boltz/P38': boltz_prompt,
+    'boltz/THROMBIN': boltz_prompt,
+    'boltz/TYK2': boltz_prompt,
+    # PMO
     'pmo/Amlodipine_MPO': """
     Your task is to design a SMILES string for a molecule that satisfies the following conditions: 
     
@@ -187,6 +309,142 @@ TASK_DESCRIPTION = {
     # IMPORTANT CONSTRAINTS:
     - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO ZALEPLON: 'O=C(C)N(CC)C1=CC=CC(C2=CC=NC3=C(C=NN23)C#N)=C1'.
     - The molecular formula MUST be exactly C19H17N3O2.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    # New PMO tasks
+    'pmo/Albuterol_similarity': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Design a drug-like molecule structurally similar to albuterol (SMILES: 'CC(C)(C)NCC(O)c1ccc(O)c(CO)c1').
+    - Preserve the core scaffold and key functional groups.
+
+    # IMPORTANT CONSTRAINTS:
+    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO ALBUTEROL: 'CC(C)(C)NCC(O)c1ccc(O)c(CO)c1'.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Deco_hop': """
+    Your task is to design a SMILES string for a molecule that satisfies the following conditions:
+
+    # Conditions:
+    - Design a drug-like molecule by preserving the fixed core scaffold while modifying peripheral decorations.
+    - The molecule MUST contain this scaffold pattern: [#7]-c1n[c;h1]nc2[c;h1]c(-[#8])[c;h0][c;h1]c12
+    - Avoid these forbidden motifs: CS([#6])(=O)=O and [#7]-c1ccc2ncsc2c1
+    - Maintain 0.85 similarity to reference pharmacophore: CCCOc1cc2ncnc(Nc3ccc4ncsc4c3)c2cc1S(=O)(=O)C(C)(C)C
+
+    # IMPORTANT CONSTRAINTS:
+    - Preserve the required scaffold while exploring decoration diversity.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Isomers_c7h8n2o2': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Create a valid chemical structure that is an isomer of the molecular formula C7H8N2O2.
+    - The molecule MUST have EXACTLY: 7 Carbon (C), 8 Hydrogen (H), 2 Nitrogen (N), 2 Oxygen (O) atoms.
+
+    # IMPORTANT CONSTRAINTS:
+    - The molecular formula MUST be exactly C7H8N2O2. No missing or extra atoms are allowed.
+    - Design scientifically plausible chemical structures.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Isomers_c9h10n2o2pf2cl': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Create a valid chemical structure that is an isomer of the molecular formula C9H10N2O2PF2Cl.
+    - The molecule MUST have EXACTLY: 9 Carbon (C), 10 Hydrogen (H), 2 Nitrogen (N), 2 Oxygen (O), 1 Phosphorus (P), 2 Fluorine (F), 1 Chlorine (Cl) atoms.
+
+    # IMPORTANT CONSTRAINTS:
+    - The molecular formula MUST be exactly C9H10N2O2PF2Cl. No missing or extra atoms are allowed.
+    - Design scientifically plausible chemical structures.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Mestranol_similarity': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Design a drug-like molecule structurally similar to mestranol (SMILES: 'COc1ccc2[C@H]3CC[C@@]4(C)[C@@H](CC[C@@]4(O)C#C)[C@@H]3CCc2c1').
+    - Preserve the core steroid scaffold, ethinyl group, and methoxy substituent.
+
+    # IMPORTANT CONSTRAINTS:
+    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO MESTRANOL: 'COc1ccc2[C@H]3CC[C@@]4(C)[C@@H](CC[C@@]4(O)C#C)[C@@H]3CCc2c1'.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/QED': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Design a drug-like molecule that maximizes the QED (Quantitative Estimation of Drug-likeness) score.
+    - QED scores range from 0 to 1, with higher values indicating better drug-likeness.
+    - Consider molecular properties like molecular weight, LogP, number of H-bond donors/acceptors, rotatable bonds, and aromatic rings.
+
+    # IMPORTANT CONSTRAINTS:
+    - Aim for QED scores approaching 1.0.
+    - Ensure synthetic feasibility and chemical realism.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Scaffold_hop': """
+    Your task is to design a SMILES string for a molecule that satisfies the following conditions:
+
+    # Conditions:
+    - Design a drug-like molecule by removing the original scaffold while preserving critical decorations.
+    - Remove this scaffold: [#7]-c1n[c;h1]nc2[c;h1]c(-[#8])[c;h0][c;h1]c12
+    - Preserve this decoration pattern: [#6]-[#6]-[#6]-[#8]-[#6]~[#6]~[#6]~[#6]~[#6]-[#7]-c1ccc2ncsc2c1
+    - Reference pharmacophore: CCCOc1cc2ncnc(Nc3ccc4ncsc4c3)c2cc1S(=O)(=O)C(C)(C)C
+
+    # IMPORTANT CONSTRAINTS:
+    - Creatively modify the core structure while maintaining pharmacophore similarity.
+    - Maintain drug-like properties throughout the scaffold substitution.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Thiothixene_Rediscovery': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Design a drug-like molecule structurally similar to thiothixene (SMILES: 'CN(C)S(=O)(=O)c1ccc2Sc3ccccc3C(=CCCN4CCN(C)CC4)c2c1').
+    - Preserve the thioxanthene core structure and essential pharmacophoric elements.
+
+    # IMPORTANT CONSTRAINTS:
+    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO THIOTHIXENE: 'CN(C)S(=O)(=O)c1ccc2Sc3ccccc3C(=CCCN4CCN(C)CC4)c2c1'.
+    - Maintain drug-like properties.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Troglitazone_Rediscovery': """
+    Your task is to design a SMILES string for a molecule that satisfies the following condition:
+
+    # Conditions:
+    - Design a drug-like molecule structurally similar to troglitazone (SMILES: 'Cc1c(C)c2OC(C)(COc3ccc(CC4SC(=O)NC4=O)cc3)CCc2c(C)c1O').
+    - Preserve the thiazolidinedione ring, chroman moiety, and phenolic hydroxyl group.
+
+    # IMPORTANT CONSTRAINTS:
+    - YOU MUST NOT GENERATE A MOLECULE IDENTICAL TO TROGLITAZONE: 'Cc1c(C)c2OC(C)(COc3ccc(CC4SC(=O)NC4=O)cc3)CCc2c(C)c1O'.
+    - Maintain drug-like properties.
+    - Avoid repeating molecules you already generated.
+    """,
+
+    'pmo/Valsartan_smarts': """
+    Your task is to design a SMILES string for a molecule that satisfies the following conditions:
+
+    # Conditions:
+    - Design a drug-like molecule that contains the following SMARTS pattern: CN(C=O)Cc1ccc(c2ccccc2)cc1
+    - Target approximate molecular properties:
+      - LogP around 2.0
+      - TPSA around 95
+      - Bertz complexity around 800
+
+    # IMPORTANT CONSTRAINTS:
+    - The molecule MUST contain the required structural motif: CN(C=O)Cc1ccc(c2ccccc2)cc1
+    - Maintain drug-like properties.
     - Avoid repeating molecules you already generated.
     """,
 }
