@@ -136,8 +136,8 @@ def run_boltz_single(args: Tuple[str, str, str, int], run_name: str) -> Dict[str
             logger.warning(f"Boltz failed for {smiles[:50]}... (returncode={result.returncode}): {error_msg}")
             return {
                 'smiles': smiles,
-                'affinity_pred_value': None,
-                'affinity_probability_binary': None,
+                'affinity_pred_value': 0,
+                'affinity_probability_binary': 0,
                 'is_valid': False,
                 'error': error_msg
             }
@@ -172,8 +172,8 @@ def run_boltz_single(args: Tuple[str, str, str, int], run_name: str) -> Dict[str
             logger.warning(error_msg)
             return {
                 'smiles': smiles,
-                'affinity_pred_value': None,
-                'affinity_probability_binary': None,
+                'affinity_pred_value': 0,
+                'affinity_probability_binary': 0,
                 'is_valid': False,
                 'error': error_msg
             }
@@ -186,15 +186,15 @@ def run_boltz_single(args: Tuple[str, str, str, int], run_name: str) -> Dict[str
             'affinity_pred_value': affinity_data.get('affinity_pred_value'),
             'affinity_probability_binary': affinity_data.get('affinity_probability_binary'),
             'is_valid': True,
-            'error': None
+            'error': ''
         }
 
     except subprocess.TimeoutExpired:
         logger.warning(f"Boltz timeout for {smiles[:50]}...")
         return {
             'smiles': smiles,
-            'affinity_pred_value': None,
-            'affinity_probability_binary': None,
+            'affinity_pred_value': 0,
+            'affinity_probability_binary': 0,
             'is_valid': False,
             'error': 'Timeout'
         }
@@ -202,8 +202,8 @@ def run_boltz_single(args: Tuple[str, str, str, int], run_name: str) -> Dict[str
         logger.error(f"Error processing {smiles[:50]}...: {e}")
         return {
             'smiles': smiles,
-            'affinity_pred_value': None,
-            'affinity_probability_binary': None,
+            'affinity_pred_value': 0,
+            'affinity_probability_binary': 0,
             'is_valid': False,
             'error': str(e)
         }
@@ -258,7 +258,7 @@ def compute_boltz(
                     'affinity_pred_value': score_details['affinity_pred_value'],
                     'affinity_probability_binary': score_details['affinity_probability_binary'],
                     'is_valid': True,
-                    'error': None,
+                    'error': '',
                 }
             else:
                 result = run_boltz_single(args[:-2], run_name)

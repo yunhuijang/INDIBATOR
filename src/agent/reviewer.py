@@ -4,6 +4,7 @@ import logging
 from typing import Dict, List, Any
 import wandb
 import json
+import os
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 
@@ -109,7 +110,10 @@ def review_candidates(
         # Boltz binding affinity tasks
         smiles_list = [c['smiles'] for c in candidates]
         wandb.log({"smiles_list": smiles_list})
-        json.dump(smiles_list, open(f"output/boltz/{task_name.split('/')[-1]}/smiles_list_{run_name}.json", "w"))
+        folder_name =f"output/boltz/{task_name.split('/')[-1]}"
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name, exist_ok=True)
+        json.dump(smiles_list, open(f"{folder_name}/smiles_list_{run_name}.json", "w"))
         
         if len(candidates) >= num_candidates:
             overall_score, result_df = evaluate_boltz(candidates, task_name, run_name)
@@ -125,10 +129,10 @@ def review_candidates(
                 if smiles in result_dict:
                     info = result_dict[smiles]
                     # Score is negated affinity (higher = better binding)
-                    candidate["score"] = info.get("score") or 0
+                    candidate["score"] = info.get("score", 0)
                     candidate["score_details"] = {
-                        'affinity_pred_value': info.get("affinity_pred_value"),
-                        'affinity_probability_binary': info.get("affinity_probability_binary"),
+                        'affinity_pred_value': info.get("affinity_pred_value", 0),
+                        'affinity_probability_binary': info.get("affinity_probability_binary", 0),
                         'is_novel': is_novel
                     }
                     candidate["is_valid"] = info.get("is_valid", False)

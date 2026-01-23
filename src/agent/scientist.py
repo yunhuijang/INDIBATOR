@@ -123,7 +123,7 @@ def create_scientist_agent(model, scientist_name: str, profile: ScientistProfile
     return agent
 
 
-def load_scientist_profiles(scientist_names: List[str], task_name: str) -> Dict[str, ScientistProfile]:
+def load_scientist_profiles(scientist_names: List[str], task_name: str, is_publication_profile_on: bool, is_molecule_profile_on: bool) -> Dict[str, ScientistProfile]:
     """Load profiles for all selected scientists.
 
     Args:
@@ -135,8 +135,14 @@ def load_scientist_profiles(scientist_names: List[str], task_name: str) -> Dict[
     profiles = {}
 
     for name in scientist_names:
-        publications = get_publications_by_author(name, task_name)
-        molecules = get_molecules_by_author(name, task_name)
+        if is_publication_profile_on:
+            publications = get_publications_by_author(name, task_name)
+        else:
+            publications = []
+        if is_molecule_profile_on:
+            molecules = get_molecules_by_author(name, task_name)
+        else:
+            molecules = []
 
         profiles[name] = {
             "name": name,
@@ -270,7 +276,7 @@ Vote for your top candidates by assigning scores from 0.0 to 1.0.
 Format each vote as: SMILES: score
 
 Consider:
-- Relevance to the task (binding affinity to target)
+- Relevance to the task
 - Synthetic feasibility
 - Novelty compared to existing drugs
 - Critiques received from other scientists

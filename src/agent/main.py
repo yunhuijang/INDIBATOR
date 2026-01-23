@@ -227,6 +227,10 @@ Examples:
     parser.add_argument("--is_rag_keyword", action="store_true", help="Enable keyword-based RAG")
     parser.add_argument("--min_rounds", type=int, default=0,
                         help="Minimum rounds to run (default: 0)")
+    parser.add_argument("--is_critque_on", action="store_false", help="Enable critique phase")
+    parser.add_argument("--is_voting_on", action="store_false", help="Enable voting phase")
+    parser.add_argument("--is_molecule_profile_on", action="store_false", help="Enable molecule profile")
+    parser.add_argument("--is_publication_profile_on", action="store_false", help="Enable publication profile")
     args = parser.parse_args()
 
     if args.verbose:
@@ -238,6 +242,15 @@ Examples:
         run_name += "_vanilla"
     if args.is_self_critique_on:
         run_name += "_self_critique"
+    if args.is_molecule_profile_on:
+        run_name += "_mol"
+    if args.is_publication_profile_on:
+        run_name += "_pub"
+    if args.is_critque_on:
+        run_name += "_critque"
+    if args.is_voting_on:
+        run_name += "_vote"
+        
     wandb.init(
         project="clever-hans",
         group=args.task_name.split('/')[0],
@@ -263,7 +276,11 @@ Examples:
         num_mols_per_scientist=args.num_mols_per_scientist,
         is_self_critique_on=args.is_self_critique_on,
         is_rag_keyword=args.is_rag_keyword,
-        min_rounds=args.min_rounds
+        min_rounds=args.min_rounds,
+        is_critque_on=args.is_critque_on,
+        is_voting_on=args.is_voting_on,
+        is_molecule_profile_on=args.is_molecule_profile_on,
+        is_publication_profile_on=args.is_publication_profile_on
     )
     # Run optimization
     results = run_optimization(

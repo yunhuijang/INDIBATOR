@@ -218,7 +218,8 @@ def run_baseline(
             sim_threshold=config.sim_threshold,
             freq_log=config.freq_log,
             scientist_profiles={},  # Empty for baseline
-            run_name=wandb.run.name if wandb.run else "baseline"
+            run_name=wandb.run.name if wandb.run else "baseline",
+            num_candidates=config.num_molecules
         )
         wandb.log(overall_score, step=batch_idx)
         df = pd.DataFrame(total_detailed_results)

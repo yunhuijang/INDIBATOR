@@ -48,6 +48,10 @@ class DebateOrchestrator:
         self.freq_log = config.freq_log
         self.is_self_critique_on = config.is_self_critique_on
         self.min_rounds = config.min_rounds
+        self.is_critque_on = config.is_critque_on
+        self.is_voting_on = config.is_voting_on
+        self.is_molecule_profile_on = config.is_molecule_profile_on
+        self.is_publication_profile_on = config.is_publication_profile_on
         
     def run_debate(self, task_description: str, scientist_names: List[str], cb) -> Dict[str, Any]:
         """Run a complete debate session.
@@ -95,10 +99,12 @@ class DebateOrchestrator:
                     state = self._update_scores(state)
 
             # Critique phase
-            state = self._critique_phase(state)
+            if self.is_critque_on:
+                state = self._critique_phase(state)
 
             # Voting phase
-            state = self._voting_phase(state)
+            if self.is_voting_on:
+                state = self._voting_phase(state)
 
             # Check convergence
             # Aggregate candidates by unique SMILES
@@ -195,7 +201,7 @@ class DebateOrchestrator:
         if self.use_vanilla_scientist_agent:
             sorted_profiles = {f"Scientist {i}": {"name": f"Scientist {i}", "publications": [], "molecules": []} for i in range(self.num_scientists)}
         else:
-            profiles = load_scientist_profiles(state["scientist_names"], self.task_name)
+            profiles = load_scientist_profiles(state["scientist_names"], self.task_name, self.is_publication_profile_on, self.is_molecule_profile_on)
             sorted_profiles = sorted(profiles.items(), key=lambda x: len(x[1]['molecules'])+len(x[1]['publications']), reverse=True)
             sorted_profiles = dict(sorted_profiles[:self.num_scientists])
         state["scientist_profiles"] = sorted_profiles

@@ -24,6 +24,10 @@ class DebateConfig:
     is_self_critique_on: bool = False
     is_rag_keyword: bool = False
     min_rounds: int = 0
+    is_critque_on: bool = True
+    is_voting_on: bool = True
+    is_molecule_profile_on: bool = True
+    is_publication_profile_on: bool = True
 
 
 class ScientistProfile(TypedDict):

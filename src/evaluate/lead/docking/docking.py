@@ -31,6 +31,26 @@ from multiprocessing import Process
 from multiprocessing import Queue
 import subprocess
 from openbabel import pybel
+from rdkit import Chem
+
+
+def get_largest_fragment(smi):
+    """
+    Extract the largest fragment from a SMILES string.
+    Handles salts and multi-component molecules (e.g., "drug.counterion").
+    """
+    if '.' not in smi:
+        return smi
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        # Fallback to string-based selection if RDKit fails
+        fragments = smi.split('.')
+        return max(fragments, key=len)
+    frags = Chem.GetMolFrags(mol, asMols=True)
+    if len(frags) == 1:
+        return smi
+    largest = max(frags, key=lambda m: m.GetNumAtoms())
+    return Chem.MolToSmiles(largest)
 
 
 class DockingVina(object):
@@ -82,6 +102,9 @@ class DockingVina(object):
                 SMILES string
                 ligand_mol_file (output file)
         """
+        # Keep only the largest fragment (remove salts/counterions)
+        smi = get_largest_fragment(smi)
+
         run_line = 'obabel -:%s --gen3D -O %s' % (smi, ligand_mol_file)
         result = subprocess.check_output(run_line.split(),
                                          stderr=subprocess.STDOUT,
