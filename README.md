@@ -38,6 +38,14 @@ ANTHROPIC_API_KEY=...
 GOOGLE_API_KEY=...
 ```
 
+### 4. Construct database
+
+Download molecular data and convert author names in pubmed database with:
+```
+uv run construct_dataset.py
+```
+
+
 ## Usage
 
 ### Lead Optimization
