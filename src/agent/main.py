@@ -8,6 +8,7 @@ This module orchestrates the complete workflow:
 """
 import os
 import torch
+import random
 
 os.environ.setdefault("OMP_NUM_THREADS", "8")
 os.environ.setdefault("MKL_NUM_THREADS", "8")
@@ -92,15 +93,12 @@ def run_optimization(
     with get_openai_callback() as cb:
         # Step 1: Supervisor selects scientists
         logger.info("\n[STEP 1] Supervisor selecting scientists...")
-        if config.use_vanilla_scientist_agent:
-            logger.info("Using vanilla scientist agent")
-            scientist_names = [f"Scientist {i}" for i in range(config.num_scientists)]
+
+        if config.is_rag_keyword:
+            rag_prompt = TASK_RAG_KEYWORD[config.task_name]
         else:
-            if config.is_rag_keyword:
-                rag_prompt = TASK_RAG_KEYWORD[config.task_name]
-            else:
-                rag_prompt = task_description
-            scientist_names = run_supervisor(model, rag_prompt, config.num_scientists)
+            rag_prompt = task_description
+        scientist_names = run_supervisor(model, rag_prompt, config.num_scientists)
 
         if not scientist_names:
             logger.error("No scientists selected. Check RAG service connection.")
@@ -136,17 +134,6 @@ def run_optimization(
         return []
 
     logger.info(f"Debate produced {len(candidates)} candidates")
-
-    # # Step 3: Review and score candidates
-    # if 'boltz' in config.task_name:
-    #     logger.info("\n[STEP 3] Reviewing candidates...")
-    #     final_results = review_candidates(
-    #         model, candidates, config.task_name, config.seed_mol_index, config.sim_threshold
-    #     )
-
-    # logger.info("\n" + "=" * 60)
-    # logger.info("OPTIMIZATION COMPLETE")
-    # logger.info("=" * 60)
 
     return debate_result
 
@@ -189,13 +176,12 @@ Examples:
         """
     )
 
-    parser.add_argument("--task_name", default="lead_optimization/parp1", 
+    parser.add_argument("--task_name", default="lead_optimization/parp1",
                         help="Molecular optimization task name")
     parser.add_argument("--model", "-m", default="gpt-4o-mini",
-                        # claude-sonnet-4-5-20250929, gemini-3-flash-preview, deepseek-chat
                         help="OpenAI model to use (default: gpt-4o-mini)")
     parser.add_argument("--scientists", "-s", type=int,default=3,
-        help="Number of scientists in debate (default: 10)")
+        help="Number of scientists in debate (default: 3)")
     parser.add_argument("--rounds", "-r", type=int, default=3,
         help="Maximum debate rounds (default: 3)")
     parser.add_argument("--temperature", "-t", type=float, default=0.7,
@@ -215,7 +201,6 @@ Examples:
                         help="Similarity threshold for lead optimization task")
     parser.add_argument("--wandb_mode", type=str, default="disabled",
                         help="Wandb mode (online, offline, disabled)")
-    parser.add_argument("--use_vanilla_scientist_agent", action="store_true", help="Use vanilla scientist agent")
     parser.add_argument("--num_mols_per_scientist", type=int, default=3,
                         help="Number of molecules to propose per scientist (default: 3)")
     parser.add_argument("--freq_log", type=int, default=100,
@@ -227,10 +212,6 @@ Examples:
     parser.add_argument("--is_rag_keyword", action="store_true", help="Enable keyword-based RAG")
     parser.add_argument("--min_rounds", type=int, default=0,
                         help="Minimum rounds to run (default: 0)")
-    parser.add_argument("--is_critque_on", action="store_false", help="Enable critique phase")
-    parser.add_argument("--is_voting_on", action="store_false", help="Enable voting phase")
-    parser.add_argument("--is_molecule_profile_on", action="store_false", help="Enable molecule profile")
-    parser.add_argument("--is_publication_profile_on", action="store_false", help="Enable publication profile")
     args = parser.parse_args()
 
     if args.verbose:
@@ -238,19 +219,9 @@ Examples:
 
     # Initialize wandb
     run_name = args.task_name.split('/')[1] + "_" + str(args.seed_mol_index) + "_" + str(args.sim_threshold) + "_" + args.model
-    if args.use_vanilla_scientist_agent:
-        run_name += "_vanilla"
     if args.is_self_critique_on:
         run_name += "_self_critique"
-    if args.is_molecule_profile_on:
-        run_name += "_mol"
-    if args.is_publication_profile_on:
-        run_name += "_pub"
-    if args.is_critque_on:
-        run_name += "_critque"
-    if args.is_voting_on:
-        run_name += "_vote"
-        
+
     wandb.init(
         project="clever-hans",
         group=args.task_name.split('/')[0],
@@ -270,17 +241,12 @@ Examples:
         sim_threshold=args.sim_threshold,
         num_scientists=args.scientists,
         temperature=args.temperature,
-        use_vanilla_scientist_agent=args.use_vanilla_scientist_agent,
         freq_log=args.freq_log,
         num_candidates=args.num_candidates,
         num_mols_per_scientist=args.num_mols_per_scientist,
         is_self_critique_on=args.is_self_critique_on,
         is_rag_keyword=args.is_rag_keyword,
         min_rounds=args.min_rounds,
-        is_critque_on=args.is_critque_on,
-        is_voting_on=args.is_voting_on,
-        is_molecule_profile_on=args.is_molecule_profile_on,
-        is_publication_profile_on=args.is_publication_profile_on
     )
     # Run optimization
     results = run_optimization(
@@ -294,7 +260,7 @@ Examples:
     results_print.sort(key=lambda x: x.get('score', 0), reverse=True)
     for i, candidate in enumerate(results_print):
         candidate['rank'] = i + 1
-    
+
     # Print results
     if results:
         print_results(results_print, top_k=args.top_k)

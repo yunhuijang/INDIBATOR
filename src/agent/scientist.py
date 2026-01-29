@@ -44,25 +44,6 @@ Always ground your contributions in your specific published expertise.
 When proposing molecules, provide valid SMILES strings and clear scientific rationale.
 """
 
-def create_vanilla_scientist_agent(model, task_description: str, index: int):
-    """Create a vanilla scientist agent. (without any name and profile)"""
-    
-    prompt = SCIENTIST_PROMPT_TEMPLATE.format(
-        scientist_name=f"Scientist {index}",
-        publication_summary="",
-        molecule_summary="",
-        task_description=task_description
-    )
-
-    # No tools needed - the scientist's profile is already in the system prompt
-    # Removing get_publications tool prevents redundant DB queries during debate phases
-    agent = create_agent(
-        model=model,
-        tools=[],
-        system_prompt=prompt,
-    )
-
-    return agent
 
 def create_scientist_agent(model, scientist_name: str, profile: ScientistProfile, task: str, publication_summary_agent: CompiledStateGraph=None, molecule_summary_agent: CompiledStateGraph=None):
     """Create a scientist agent with loaded expertise.
@@ -123,11 +104,12 @@ def create_scientist_agent(model, scientist_name: str, profile: ScientistProfile
     return agent
 
 
-def load_scientist_profiles(scientist_names: List[str], task_name: str, is_publication_profile_on: bool, is_molecule_profile_on: bool) -> Dict[str, ScientistProfile]:
+def load_scientist_profiles(scientist_names: List[str], task_name: str) -> Dict[str, ScientistProfile]:
     """Load profiles for all selected scientists.
 
     Args:
         scientist_names: List of scientist names to load
+        task_name: Name of the task
 
     Returns:
         Dictionary mapping names to profiles
@@ -135,14 +117,8 @@ def load_scientist_profiles(scientist_names: List[str], task_name: str, is_publi
     profiles = {}
 
     for name in scientist_names:
-        if is_publication_profile_on:
-            publications = get_publications_by_author(name, task_name)
-        else:
-            publications = []
-        if is_molecule_profile_on:
-            molecules = get_molecules_by_author(name, task_name)
-        else:
-            molecules = []
+        publications = get_publications_by_author(name, task_name)
+        molecules = get_molecules_by_author(name, task_name)
 
         profiles[name] = {
             "name": name,

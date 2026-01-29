@@ -33,6 +33,7 @@ def truncate_for_prompt(content: Any, max_chars: int = 50000) -> str:
 def find_matches(text, k=3):
     # rag.jl endpoint
     url = "http://localhost:8003/find_matches"
+    k = min(k, 100)
     payload = {"query": text, "k": k}
     response = requests.post(url, json=payload)
     if response.status_code == 200:

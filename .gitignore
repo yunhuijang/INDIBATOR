@@ -15,7 +15,14 @@ data/
 *.json
 .env
 .claude/
-bash/
 boltz/output/
 output/
 *.npz
+*.yaml
+*.pkl
+
+# Large directories
+boltz/
+pubmed-vectors/
+pubmedFastRAG/
+oracle/

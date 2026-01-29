@@ -157,6 +157,23 @@ def review_candidates(
 
             top_score = final_output[0]['score'] if final_output else 0
             logger.info(f"Review complete. Top boltz score: {top_score}")
+        else:
+            # Not enough candidates yet for boltz evaluation
+            all_sorted = candidates
+            overall_score = {"score": 0}
+            for i, c in enumerate(candidates):
+                final_output.append({
+                    "rank": i + 1,
+                    "smiles": c["smiles"],
+                    "score": c.get("score", 0) or 0,
+                    "proposer": c["proposer"],
+                    "debate_round": c["round"],
+                    "debate_votes": c.get("avg_vote", 0),
+                    "num_votes": len(c.get("votes", {})),
+                    "score_details": c.get("score_details", {}),
+                    "is_valid": c.get("is_valid", False),
+                })
+            logger.info(f"Boltz: only {len(candidates)} candidates, need {num_candidates} for evaluation")
     elif 'pmo' in task_name:
         # PMO tasks
         task_name_clean = task_name.split('/')[-1]
