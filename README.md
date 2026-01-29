@@ -48,12 +48,12 @@ uv run construct_dataset.py
 
 ## Usage
 
-### Lead Optimization
+### Boltz Binding Affinity
 
-Optimize a seed molecule for a target while satisfying QED, SA, and similarity constraints:
+Generate molecules optimized for binding affinity predicted by Boltz:
 
 ```bash
-bash bash/lead_optimization/5ht1b/5ht1b_deepseek.sh
+bash bash/boltz/TYK2.sh
 ```
 
 ### Practical Molecular Optimization (PMO)
@@ -64,13 +64,14 @@ Optimize molecules for a target oracle (e.g., GSK3B bioactivity):
 bash bash/pmo/GSK3B/run.sh
 ```
 
-### Boltz Binding Affinity
+### Lead Optimization
 
-Generate molecules optimized for binding affinity predicted by Boltz:
+Optimize a seed molecule for a target while satisfying QED, SA, and similarity constraints:
 
 ```bash
-bash bash/boltz/TYK2.sh
+bash bash/lead_optimization/5ht1b/5ht1b_deepseek.sh
 ```
+
 
 ### Custom run
 
