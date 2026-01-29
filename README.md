@@ -1,6 +1,6 @@
-# Multi-Agent Molecular Optimization
+# INDIBATOR
 
-A multi-agent system where AI "scientist" agents—grounded in real publications and molecular data—debate to optimize molecules for specific biological targets.
+INDIBATOR system where scientist agents, grounded in real publications and molecular history, debate for molecular discovery.
 
 ## Overview
 
