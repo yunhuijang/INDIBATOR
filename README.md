@@ -8,9 +8,9 @@ This is the official code repository for the paper titled [INDIBATOR: Diverse an
 
 ## Contribution
 + We introduce a method to ensure the individuality of collaborative agents by grounding them in specific expertise profiles.
-+ We propose \methodname, a multi-agent framework that utilizes research trajectories for scientific discovery, which gurantees diverse and fact-grounding agents.
++ We propose INDIBATOR, a multi-agent framework that utilizes research trajectories for scientific discovery, which gurantees diverse and fact-grounding agents.
 + We provide qualitative and quantitative analyses demonstrating the impact of individuality on agent reasoning and performance.
-+ We validate \methodname in the domain of molecular discovery, demonstrating consistent improvements across multiple downstream tasks.
++ We validate INDIBATOR in the domain of molecular discovery, demonstrating consistent improvements across multiple downstream tasks.
 
 ## Overview
 
