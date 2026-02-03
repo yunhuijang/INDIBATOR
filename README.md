@@ -1,6 +1,16 @@
 # INDIBATOR
 
-INDIBATOR system where scientist agents, grounded in real publications and molecular history, debate for molecular discovery.
+This is the official code repository for the paper titled [INDIBATOR: Diverse and Fact-Grounded Individuality for Multi-Agent Debate in Molecular Discovery](https://arxiv.org/abs/2602.01815).
+
+<p align="center">
+    <img width="750" src="assets/indibator.png"/>
+</p>
+
+## Contribution
++ We introduce a method to ensure the individuality of collaborative agents by grounding them in specific expertise profiles.
++ We propose \methodname, a multi-agent framework that utilizes research trajectories for scientific discovery, which gurantees diverse and fact-grounding agents.
++ We provide qualitative and quantitative analyses demonstrating the impact of individuality on agent reasoning and performance.
++ We validate \methodname in the domain of molecular discovery, demonstrating consistent improvements across multiple downstream tasks.
 
 ## Overview
 
@@ -102,8 +112,24 @@ uv run python -m src.agent.main \
 | `--rounds` | Maximum debate rounds | `3` |
 | `--num_candidates` | Target number of candidate molecules | `1000` |
 | `--num_mols_per_scientist` | Molecules proposed per scientist per round | `3` |
-| `--is_rag_keyword` | Use task-specific RAG keywords for scientist selection | off |
 | `--is_self_critique_on` | Enable self-critique phase | off (this should not be turned on on the tasks that constrains the number of oracle calls such as PMO) |
 | `--seed_mol_index` | Seed molecule index (lead optimization) | `1` |
 | `--sim_threshold` | Similarity threshold (lead optimization) | `0.4` |
 | `--wandb_mode` | Weights & Biases logging mode (`online`, `offline`, `disabled`) | `disabled` |
+
+
+## Citation
+
+If you find our paper and this repo useful, we kindly ask to cite our paper:
+
+```BibTex
+@misc{jang2026indibatordiversefactgroundedindividuality,
+      title={INDIBATOR: Diverse and Fact-Grounded Individuality for Multi-Agent Debate in Molecular Discovery}, 
+      author={Yunhui Jang and Seonghyun Park and Jaehyung Kim and Sungsoo Ahn},
+      year={2026},
+      eprint={2602.01815},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2602.01815}, 
+}
+```
