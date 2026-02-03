@@ -18,9 +18,9 @@ The system orchestrates a multi-round debate between scientist agents, each with
 uv sync
 ```
 
-### 2. Set up PubMed RAG service
+### 2. Set up dataset
 
-The system requires a running [pubmedFastRAG](https://github.com/...) service for scientist retrieval. You need to run this in a separate terminal.:
+The system requires a running [pubmedFastRAG](https://github.com/domluna/pubmedFastRAG) service for scientist retrieval. You need to run this in a separate terminal.:
 
 ```bash
 cd pubmedFastRAG
@@ -29,7 +29,7 @@ bash start_servers.sh
 
 ### 3. Environment variables
 
-Create a `.env` file in the project root with your API keys:
+You can choose any model that you want. Create a `.env` file in the project root with your API keys:
 
 ```
 OPENAI_API_KEY=...
@@ -38,12 +38,17 @@ ANTHROPIC_API_KEY=...
 GOOGLE_API_KEY=...
 ```
 
+
+
 ### 4. Construct database
+
+Create a project and get a project id and dataset name in [ChemBL dataset](https://console.cloud.google.com/projectselector2/bigquery?p=patents-public-data&d=patents&page=dataset&supportedpurview=project).
 
 Download molecular data and convert author names in pubmed database with:
 ```
 uv run construct_dataset.py
 ```
+
 
 
 ## Usage
