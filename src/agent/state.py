@@ -1,8 +1,7 @@
 """State definitions for the multi-agent molecular optimization system."""
 
 from dataclasses import dataclass
-from typing import TypedDict, List, Dict, Optional, Annotated
-from langgraph.graph.message import add_messages
+from typing import TypedDict, List, Dict, Optional
 
 
 @dataclass
@@ -59,7 +58,7 @@ class DebateState(TypedDict):
     scientist_profiles: Dict[str, ScientistProfile]
 
     # Debate tracking
-    messages: Annotated[List[DebateMessage], add_messages]
+    messages: List[DebateMessage]
     candidates: List[MoleculeCandidate]
     current_round: int
     max_rounds: int

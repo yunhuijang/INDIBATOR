@@ -8,7 +8,6 @@ This module orchestrates the complete workflow:
 """
 import os
 import torch
-import random
 
 os.environ.setdefault("OMP_NUM_THREADS", "8")
 os.environ.setdefault("MKL_NUM_THREADS", "8")
@@ -20,7 +19,7 @@ os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "8")
 import argparse
 import logging
 import sys
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import json
 import wandb
 

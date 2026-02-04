@@ -5,37 +5,10 @@ from typing import List, Dict, Any
 
 from langchain_core.tools import tool
 
-from src.utils import find_matches, normalize_author_name
+from src.utils import find_matches
 from src.db.queries import get_publications_by_author, get_molecules_by_author
 
 logger = logging.getLogger(__name__)
-
-
-# @tool
-# def get_pubmed_results(query: str, k: int = 3) -> List[Dict[str, Any]]:
-#     """Get PubMed results for a given query.
-
-#     Args:
-#         query: Search query string
-#         k: Number of results to return
-
-#     Returns:
-#         List of matching publications with metadata
-#     """
-#     matches = find_matches(query, k)
-
-#     results = []
-#     for match in matches:
-#         results.append({
-#             'pmid': match['pmid'],
-#             'distance': match['distance'],
-#             'title': match['title'],
-#             'authors': match['authors'],
-#             'publication_year': match['publication_year'],
-#             'abstract': match['abstract']
-#         })
-
-#     return results
 
 
 @tool

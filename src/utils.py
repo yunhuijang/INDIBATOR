@@ -13,6 +13,18 @@ from prompt.task_related_molecules import TASK_RELATED_MOLECULES
 
 logger = logging.getLogger(__name__)
 
+# Seed molecules for lead optimization tasks by protein target
+PROTEIN_SEEDMOL_DICT = {
+    'parp1': ['CN(C)Cc3ccc2c(CNC(=O)c1cccn12)c3', 'COc1[nH]c3cccc2C(=O)NCCc1c23', 'O/N=C/c1cn3CCNC(=O)c2cccc1c23'],
+    'fa7': ['CC(C)CCN(Cc2ccc1ccc(C(N)=N)cc1c2)C(=O)c3cccc4ccccc34', 'N[C@H](Cc1ccccc1)C(=O)N2CCC[C@H]2C(=O)N[C@H](CCl)CCCN=C(N)N', 'CC(C)Nc3ccc(c1cc(N)cc(C(O)=O)c1)n(CC(=O)NCc2ccc(C(N)=N)cc2)c3=O'],
+    '5ht1b': ['Cc1nc(-c2ccc(-c3ccc(C(=O)N4CCc5cc6c(cc54)[C@]4(CC[N@H+](C)CC4)CO6)cc3)c(C)c2)no1', 'FC(F)(F)c1cccc(N2CC[NH2+]CC2)c1', 'C1=CC2=NC=C(CCCN3CC[NH+](CCc4ccccc4)CC3)[C@H]2C=C1n1cnnc1'],
+    'braf': ['CCN(CC)CCNC(=O)c3cnn4c(c2cccc(NC(=O)Nc1ccc(Cl)c(C(F)(F)F)c1)c2)ccnc34', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)NCCN1CCOCC1)c2)cc3)ccc4Cl', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)Nc1cccnc1)c2)cc3)ccc4Cl'],
+    'jak2': ['OCCCCc2nc1ccccc1c4ncnc3[nH]cc2c34', 'COC(=O)CC2Nc1ccccc1c3ccnc4[nH]cc2c34', 'Oc5ccc(C2NC(=O)c1ccccc1c3ccnc4[nH]cc2c34)c(F)c5'],
+    'sars_cov_2': ['C1=C(N=C(C(=O)N1)C(=O)N)F', 'CN(CC1=C(C(=CC(=C1)Br)Br)N)C2CCCCC2', 'CCC(C)SSC1=NC=CN1',
+                   'C1=CC=C(C=C1)N2C(=O)C3=CC=CC=C3[Se]2', 'CCN(CC)C(=S)SSC(=S)N(CC)CC', 'C=C1[C@H](C[C@@H]([C@H]1CO)O)N2C=NC3=C2N=C(NC3=O)N',
+                   'C1=CC(=C(C=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O)O', 'C1=CC(=CC=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O']
+}
+
 
 def truncate_for_prompt(content: Any, max_chars: int = 50000) -> str:
     """Truncate content to fit within token limits.
@@ -97,16 +109,7 @@ def get_task_description(task_name: str, seed_mol_index: int, sim_threshold: flo
             task_description = TASK_DESCRIPTION[task_name].format(seed_molecules=seed_molecules, protein_name=protein_name, docking_score_threshold=docking_score_threshold)
         # Genmol lead optimization
         else:
-            protein_seedmol_dict = {'parp1': ['CN(C)Cc3ccc2c(CNC(=O)c1cccn12)c3', 'COc1[nH]c3cccc2C(=O)NCCc1c23', 'O/N=C/c1cn3CCNC(=O)c2cccc1c23'],
-                                    'fa7': ['CC(C)CCN(Cc2ccc1ccc(C(N)=N)cc1c2)C(=O)c3cccc4ccccc34', 'N[C@H](Cc1ccccc1)C(=O)N2CCC[C@H]2C(=O)N[C@H](CCl)CCCN=C(N)N', 'CC(C)Nc3ccc(c1cc(N)cc(C(O)=O)c1)n(CC(=O)NCc2ccc(C(N)=N)cc2)c3=O'],
-                                    '5ht1b': ['Cc1nc(-c2ccc(-c3ccc(C(=O)N4CCc5cc6c(cc54)[C@]4(CC[N@H+](C)CC4)CO6)cc3)c(C)c2)no1', 'FC(F)(F)c1cccc(N2CC[NH2+]CC2)c1', 'C1=CC2=NC=C(CCCN3CC[NH+](CCc4ccccc4)CC3)[C@H]2C=C1n1cnnc1'],
-                                    'braf': ['CCN(CC)CCNC(=O)c3cnn4c(c2cccc(NC(=O)Nc1ccc(Cl)c(C(F)(F)F)c1)c2)ccnc34', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)NCCN1CCOCC1)c2)cc3)ccc4Cl', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)Nc1cccnc1)c2)cc3)ccc4Cl'],
-                                    'jak2': ['OCCCCc2nc1ccccc1c4ncnc3[nH]cc2c34', 'COC(=O)CC2Nc1ccccc1c3ccnc4[nH]cc2c34', 'Oc5ccc(C2NC(=O)c1ccccc1c3ccnc4[nH]cc2c34)c(F)c5'],
-                                    'sars_cov_2': ['C1=C(N=C(C(=O)N1)C(=O)N)F', 'CN(CC1=C(C(=CC(=C1)Br)Br)N)C2CCCCC2', 'CCC(C)SSC1=NC=CN1',
-                                                'C1=CC=C(C=C1)N2C(=O)C3=CC=CC=C3[Se]2', 'CCN(CC)C(=S)SSC(=S)N(CC)CC', 'C=C1[C@H](C[C@@H]([C@H]1CO)O)N2C=NC3=C2N=C(NC3=O)N',
-                                                'C1=CC(=C(C=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O)O', 'C1=CC(=CC=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O']}
-
-            seed_mol = protein_seedmol_dict[protein][seed_mol_index]
+            seed_mol = PROTEIN_SEEDMOL_DICT[protein][seed_mol_index]
             task_description = TASK_DESCRIPTION[task_name].format(seed_mol=seed_mol, sim_threshold=sim_threshold, protein_name=protein_name)
 
     elif 'boltz' in task_name:
@@ -203,17 +206,8 @@ def safe_parse_json_list(text: str) -> list:
 
 def get_related_molecules(task_name: str, seed_mol_index: int = 1) -> str:
     if 'lead_optimization' in task_name:
-        protein_seedmol_dict = {'parp1': ['CN(C)Cc3ccc2c(CNC(=O)c1cccn12)c3', 'COc1[nH]c3cccc2C(=O)NCCc1c23', 'O/N=C/c1cn3CCNC(=O)c2cccc1c23'],
-                                'fa7': ['CC(C)CCN(Cc2ccc1ccc(C(N)=N)cc1c2)C(=O)c3cccc4ccccc34', 'N[C@H](Cc1ccccc1)C(=O)N2CCC[C@H]2C(=O)N[C@H](CCl)CCCN=C(N)N', 'CC(C)Nc3ccc(c1cc(N)cc(C(O)=O)c1)n(CC(=O)NCc2ccc(C(N)=N)cc2)c3=O'],
-                                '5ht1b': ['Cc1nc(-c2ccc(-c3ccc(C(=O)N4CCc5cc6c(cc54)[C@]4(CC[N@H+](C)CC4)CO6)cc3)c(C)c2)no1', 'FC(F)(F)c1cccc(N2CC[NH2+]CC2)c1', 'C1=CC2=NC=C(CCCN3CC[NH+](CCc4ccccc4)CC3)[C@H]2C=C1n1cnnc1'],
-                                'braf': ['CCN(CC)CCNC(=O)c3cnn4c(c2cccc(NC(=O)Nc1ccc(Cl)c(C(F)(F)F)c1)c2)ccnc34', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)NCCN1CCOCC1)c2)cc3)ccc4Cl', 'FC(F)(F)c4cc(NC(=O)Nc3ccc(Oc2ccnc(C(=O)Nc1cccnc1)c2)cc3)ccc4Cl'],
-                                'jak2': ['OCCCCc2nc1ccccc1c4ncnc3[nH]cc2c34', 'COC(=O)CC2Nc1ccccc1c3ccnc4[nH]cc2c34', 'Oc5ccc(C2NC(=O)c1ccccc1c3ccnc4[nH]cc2c34)c(F)c5'],
-                                'sars_cov_2': ['C1=C(N=C(C(=O)N1)C(=O)N)F', 'CN(CC1=C(C(=CC(=C1)Br)Br)N)C2CCCCC2', 'CCC(C)SSC1=NC=CN1',
-                                               'C1=CC=C(C=C1)N2C(=O)C3=CC=CC=C3[Se]2', 'CCN(CC)C(=S)SSC(=S)N(CC)CC', 'C=C1[C@H](C[C@@H]([C@H]1CO)O)N2C=NC3=C2N=C(NC3=O)N',
-                                               'C1=CC(=C(C=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O)O', 'C1=CC(=CC=C1C2=C(C(=O)C3=C(C=C(C=C3O2)O)O)O)O']
-                                }
         protein = task_name.split('/')[-1]
-        related_molecules = [protein_seedmol_dict[protein][seed_mol_index]]
+        related_molecules = [PROTEIN_SEEDMOL_DICT[protein][seed_mol_index]]
     else:
         related_molecules = TASK_RELATED_MOLECULES[task_name]
         

@@ -1,49 +1,11 @@
 # Supervisor agent for selecting scientists for the molecular optimization debate.
 
 import logging
-from typing import Dict, List, Any
-
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from typing import List
 
 from src.agent.tools import get_scientists
 
 logger = logging.getLogger(__name__)
-
-SUPERVISOR_PROMPT = """You are the Supervisor Agent for a molecular optimization project.
-
-Your role is to identify the most relevant scientists for the given task by analyzing
-their publication history and expertise in the relevant domain.
-
-When given a task:
-1. Use the get_scientists tool to search for relevant researchers
-2. The tool will find publications relevant to the task and extract author names
-3. Consider scientists who have expertise in:
-   - The target protein/pathway mentioned
-   - Similar molecular scaffolds
-   - Relevant assay development or screening methods
-
-Return the complete list of scientist names that will participate in the debate.
-Be thorough in your search to ensure diverse expertise.
-"""
-
-
-def create_supervisor_agent(model):
-    """Create the supervisor agent for scientist selection.
-
-    Args:
-        model: The LLM model to use
-
-    Returns:
-        Compiled ReAct agent for scientist selection
-    """
-    agent = create_agent(
-        model=model,
-        tools=[get_scientists],
-        system_prompt=SUPERVISOR_PROMPT,
-    )
-
-    return agent
 
 
 def run_supervisor(model, rag_prompt, num_scientists: int = 10) -> List[str]:

@@ -5,29 +5,11 @@ from typing import Dict, List, Any
 import wandb
 import json
 import os
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
-
 
 from src.evaluate.tools_evaluate import evaluate_pmo, evaluate_lead, evaluate_boltz
 from src.agent.state import MoleculeCandidate, ScientistProfile
-from src.utils import extract_content
 
 logger = logging.getLogger(__name__)
-
-REVIEWER_PROMPT = """You are the Reviewer Agent responsible for quality verification of molecular candidates.
-
-Your role is to evaluate each candidate molecule for:
-1. Chemical validity - Is the SMILES string valid?
-2. Drug-likeness - Does it follow Lipinski's rule of five?
-3. Synthetic accessibility - Can it be synthesized practically?
-4. Predicted activity - How likely is it to achieve the task goal?
-
-Use the compute_molecule_score tool to get objective metrics for each candidate.
-After scoring, provide a final ranked list with justifications.
-
-Be thorough and objective in your assessments.
-"""
 
 
 def review_candidates(

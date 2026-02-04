@@ -1,13 +1,11 @@
 """Debate orchestrator for multi-round molecular optimization debates."""
 
 import logging
-from typing import Dict, List, Literal, Any
+from typing import Dict, List, Any
 import wandb
 import pandas as pd
-from langgraph.graph import StateGraph, END
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-
 
 from src.agent.state import DebateState, MoleculeCandidate, DebateConfig
 from src.agent.scientist import create_scientist_agent, load_scientist_profiles, \
@@ -491,23 +489,6 @@ class DebateOrchestrator:
                     smiles_list.append(canonical)
         return smiles_list
 
-    def _format_previous_proposals(self, state: DebateState) -> str:
-        """Format previous proposals for context."""
-        proposals = [
-            m for m in state.get("messages", [])
-            if m["message_type"] == "proposal"
-        ]
-
-        if not proposals:
-            return "No previous proposals."
-
-        lines = []
-        for p in proposals[-10:]:  # Last 10 proposals
-            snippet = p["content"][:1000] + "..." if len(p["content"]) > 1000 else p["content"]
-            lines.append(f"{p['speaker']} (round {p['round']}): {snippet}")
-
-        return "\n\n".join(lines)
-
     def _format_proposals_for_critique(self, candidates: List[MoleculeCandidate]) -> str:
         """Format proposals for the critique phase with scores."""
 
@@ -588,46 +569,3 @@ class DebateOrchestrator:
                     'justification': r.get('justification', '')
                 }
         return votes
-
-
-def build_debate_graph(orchestrator: DebateOrchestrator) -> StateGraph:
-    """Build a LangGraph StateGraph for the debate process.
-
-    This provides an alternative graph-based execution model.
-
-    Args:
-        orchestrator: The debate orchestrator instance
-
-    Returns:
-        Compiled StateGraph
-    """
-    workflow = StateGraph(DebateState)
-
-    # Define nodes
-    workflow.add_node("initialize", lambda s: orchestrator._initialize_debate(s))
-    workflow.add_node("proposal", lambda s: orchestrator._proposal_phase(s))
-    workflow.add_node("critique", lambda s: orchestrator._critique_phase(s))
-    workflow.add_node("voting", lambda s: orchestrator._voting_phase(s))
-    workflow.add_node("aggregate", lambda s: orchestrator._aggregate_results(s))
-
-    # Define routing
-    def should_continue(state: DebateState) -> Literal["continue", "end"]:
-        if state["current_round"] >= orchestrator.max_rounds:
-            return "end"
-        if orchestrator._check_consensus(state):
-            return "end"
-        return "continue"
-
-    # Define edges
-    workflow.set_entry_point("initialize")
-    workflow.add_edge("initialize", "proposal")
-    workflow.add_edge("proposal", "critique")
-    workflow.add_edge("critique", "voting")
-    workflow.add_conditional_edges(
-        "voting",
-        should_continue,
-        {"continue": "proposal", "end": "aggregate"}
-    )
-    workflow.add_edge("aggregate", END)
-
-    return workflow.compile()
