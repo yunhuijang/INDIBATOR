@@ -20,6 +20,12 @@ The system orchestrates a multi-round debate between scientist agents, each with
 2. **Scientist agents** propose, critique, and vote on molecular candidates across multiple debate rounds
 3. **Reviewer** scores and validates the generated molecules
 
+## Requirements
+
+- Python 3.11+
+- Julia (required for pubmedFastRAG)
+- [uv](https://docs.astral.sh/uv/) package manager
+
 ## Installation
 
 ### 1. Install dependencies
@@ -58,6 +64,8 @@ Download molecular data and convert author names in pubmed database with:
 ```
 uv run construct_dataset.py
 ```
+
+**Note:** This step can be skipped if you already have the data files (`pubmed-vectors/pubmed_data.db` and `data/molecules_by_author_all.parquet`).
 
 
 
@@ -116,6 +124,7 @@ uv run python -m src.agent.main \
 | `--seed_mol_index` | Seed molecule index (lead optimization) | `1` |
 | `--sim_threshold` | Similarity threshold (lead optimization) | `0.4` |
 | `--wandb_mode` | Weights & Biases logging mode (`online`, `offline`, `disabled`) | `disabled` |
+| `--temperature` | LLM temperature | `0.7` |
 
 
 ## Citation
