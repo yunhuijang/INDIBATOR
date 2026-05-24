@@ -1,6 +1,6 @@
 # INDIBATOR
 
-This is the official code repository for the paper titled [INDIBATOR: Diverse and Fact-Grounded Individuality for Multi-Agent Debate in Molecular Discovery](https://arxiv.org/abs/2602.01815).
+This is the official code repository for the paper titled [INDIBATOR: Diverse and Fact-Grounded Individuality for Multi-Agent Debate in Molecular Discovery](https://example.com/anonymous-paper-link).
 
 <p align="center">
     <img width="750" src="assets/indibator.png"/>
@@ -132,13 +132,13 @@ uv run python -m src.agent.main \
 If you find our paper and this repo useful, we kindly ask to cite our paper:
 
 ```BibTex
-@misc{jang2026indibatordiversefactgroundedindividuality,
+@misc{anonymous2026indibator,
       title={INDIBATOR: Diverse and Fact-Grounded Individuality for Multi-Agent Debate in Molecular Discovery}, 
-      author={Yunhui Jang and Seonghyun Park and Jaehyung Kim and Sungsoo Ahn},
+      author={Anonymous Authors},
       year={2026},
-      eprint={2602.01815},
+      eprint={xxxx.xxxxx},
       archivePrefix={arXiv},
       primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2602.01815}, 
+      url={https://example.com/anonymous-paper-link}, 
 }
 ```
